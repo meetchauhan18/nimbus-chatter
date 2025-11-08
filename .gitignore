@@ -1,0 +1,154 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.pnp
+.pnp.js
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*.local
+.npmrc
+
+# Build outputs
+dist/
+dist-ssr/
+build/
+*.local
+
+# Client specific (Vite/React)
+client/.vite
+client/dist
+client/dist-ssr
+client/coverage
+client/*.local
+.vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Testing
+coverage/
+*.coverage
+.nyc_output
+.jest-cache
+
+# IDE and editors
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*.swo
+*~
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Runtime data
+lib-cov
+
+# MongoDB
+docker/mongodb/data/
+*.mongodb
+
+# Redis
+docker/redis/data/
+dump.rdb
+appendonly.aof
+
+# Docker
+.dockerignore
+
+# OS
+.DS_Store
+.DS_Store?
+Thumbs.db
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.backup
+*.cache
+
+# Package manager locks (keep only one)
+# Uncomment if using yarn exclusively:
+# package-lock.json
+# Uncomment if using npm exclusively:
+# yarn.lock
+
+# ESLint cache
+.eslintcache
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional stylelint cache
+.stylelintcache
+
+# Microbundle cache
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# Optional REPL history
+.node_repl_history
+
+# AWS credentials
+.aws/
+
+# Certificates
+*.pem
+*.key
+*.cert
+*.crt
+
+# Misc
+.serverless
+.dynamodb
+.webpack
+.fusebox
+.tern-port
+.vscode-test
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
