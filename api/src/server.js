@@ -16,7 +16,8 @@ import { cacheClient, pubClient, subClient } from "./config/redis.js";
 import { verifyAccessToken } from "./config/jwt.js";
 import Conversation from "./models/Conversation.js";
 import User from "./models/user.js";
-import { createAdapter } from "@socket.io/redis-adapter";    
+import { createAdapter } from "@socket.io/redis-adapter";
+import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 
 // ✅ Get directory name for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -51,11 +52,6 @@ const limiter = rateLimit({
 });
 app.use("/api/", limiter);
 
-// ✅ Health check routes
-app.get("/health", (req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
-});
-
 app.get("/readiness", async (req, res) => {
   const checks = { mongodb: false, redis: false };
 
@@ -84,14 +80,21 @@ app.get("/readiness", async (req, res) => {
 // ✅ Routes
 app.use("/api/auth", authRoutes);
 
-// ✅ Error handler
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(err.status || 500).json({
-    error:
-      process.env.NODE_ENV === "development" ? err.message : "Server error",
+// ✅ Health check (existing)
+app.get("/health", (req, res) => {
+  res.json({
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || "development",
   });
 });
+
+// 🆕 404 Handler (ADD THIS)
+app.use(notFoundHandler);
+
+// 🆕 Global Error Handler (ADD THIS - MUST BE LAST)
+app.use(errorHandler);
 
 // ✅ Create HTTP server
 const server = http.createServer(app);

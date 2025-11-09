@@ -1,96 +1,29 @@
-import { generateAccessToken, generateRefreshToken } from "../config/jwt.js";
-import User from "../models/user.js";
+import { authService } from "../services/auth.service.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { successResponse } from "../utils/response.js";
 
-// 🧩 Register User
-export const register = async (req, res) => {
-  try {
-    const { phone, displayName, password } = req.body;
 
-    // Validate input
-    if (!phone || !displayName || !password) {
-      return res.status(400).json({ error: "All fields required" });
-    }
+export const register = asyncHandler(async (req, res) => {
+  const result = await authService.register(req.body);
 
-    // Check if user exists
-    const existingUser = await User.findOne({ phone });
-    if (existingUser) {
-      return res.status(409).json({ error: "Phone already registered" });
-    }
+  res
+    .status(201)
+    .json(successResponse(result, "User registered successfully", 201));
+});
 
-    // Create new user
-    const user = await User.create({ phone, displayName, password });
+export const login = asyncHandler(async (req, res) => {
+  const result = await authService.login(req.body);
 
-    // Generate JWT tokens
-    const accessToken = generateAccessToken(user._id, user.phone);
-    const refreshToken = generateRefreshToken(user._id);
+  res.json(successResponse(result, "Login successful"));
+});
 
-    res.status(201).json({
-      user: {
-        id: user._id,
-        phone: user.phone,
-        displayName: user.displayName,
-        avatar: user.avatar,
-        status: user.status,
-      },
-      accessToken,
-      refreshToken,
-    });
-  } catch (error) {
-    console.error("Register error:", error);
-    res.status(500).json({ error: "Server error" });
-  }
-};
+export const refreshToken = asyncHandler(async (req, res) => {
+  const result = await authService.refreshAccessToken(req.body.refreshToken);
 
-// 🧩 Login User
-export const login = async (req, res) => {
-  try {
-    
-    const { phone, password } = req.body;
-    console.log("🚀 ~ login ~ req.body", req.body)
+  res.json(successResponse(result, "Token refreshed successfully"));
+});
 
-    if (!phone || !password) {
-      return res.status(400).json({ error: "Phone and password required" });
-    }
-
-    // Find user with password
-    const user = await User.findOne({ phone }).select("+password");
-    if (!user) {
-      return res.status(401).json({ error: "Invalid credentials" });
-    }
-
-    // Verify password
-    const isMatch = await user.comparePassword(password);
-    if (!isMatch) {
-      return res.status(401).json({ error: "Invalid credentials" });
-    }
-
-    // Generate JWT tokens
-    const accessToken = generateAccessToken(user._id, user.phone);
-    const refreshToken = generateRefreshToken(user._id);
-
-    res.json({
-      user: {
-        id: user._id,
-        phone: user.phone,
-        displayName: user.displayName,
-        avatar: user.avatar,
-        status: user.status,
-      },
-      accessToken,
-      refreshToken,
-    });
-  } catch (error) {
-    console.error("Login error:", error);
-    res.status(500).json({ error: "Server error" });
-  }
-};
-
-// 🧩 Get Authenticated User
-export const getMe = async (req, res) => {
-  try {
-    res.json({ user: req.user });
-  } catch (error) {
-    console.error("GetMe error:", error);
-    res.status(500).json({ error: "Server error" });
-  }
-};
+export const logout = asyncHandler(async (req, res) => {
+  // In production, you'd invalidate the token in Redis
+  res.json(successResponse(null, "Logout successful"));
+});
