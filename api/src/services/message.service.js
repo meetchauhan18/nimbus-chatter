@@ -27,13 +27,13 @@ export class MessageService {
     }
 
     const message = await Message.create({
-        clientMsgId: `${senderId}_${Date.now()}_${Math.random().toString(36)}`, // ✅ NEW
-        conversationId,
-        senderId,
-        content,
-        type,
-        metadata: metadata || {},
-        status: 'sent'
+      clientMsgId: `${senderId}_${Date.now()}_${Math.random().toString(36)}`,
+      conversationId,
+      senderId, // ✅ Correct field name
+      content,
+      type,
+      metadata: metadata || {},
+      status: 'sent'
     });
 
     // Update conversation's last message
@@ -42,8 +42,8 @@ export class MessageService {
       updatedAt: new Date()
     });
 
-    // Populate sender info
-    await message.populate('sender', 'displayName avatar phone');
+    // ✅ FIXED: Populate 'senderId' not 'sender'
+    await message.populate('senderId', 'displayName avatar phone');
 
     return message;
   }
@@ -52,7 +52,7 @@ export class MessageService {
    * Get messages for a conversation (with pagination)
    */
   async getMessages(conversationId, { before = null, limit = 50 }) {
-    const query = { conversation: conversationId };
+    const query = { conversationId }; // ✅ FIXED: Use 'conversationId' not 'conversation'
     
     // Cursor-based pagination
     if (before) {
@@ -63,7 +63,7 @@ export class MessageService {
       .find(query)
       .sort({ createdAt: -1 })
       .limit(limit)
-      .populate('sender', 'displayName avatar phone')
+      .populate('senderId', 'displayName avatar phone') // ✅ FIXED
       .lean();
 
     return {
@@ -83,9 +83,9 @@ export class MessageService {
       throw new NotFoundError('Message not found');
     }
 
-    // Update delivery status
-    if (!message.deliveredTo.includes(userId)) {
-      message.deliveredTo.push(userId);
+    // ✅ FIXED: Use your schema's structure
+    if (!message.deliveredTo.some(d => d.userId.toString() === userId.toString())) {
+      message.deliveredTo.push({ userId, timestamp: new Date() });
       message.status = 'delivered';
       await message.save();
     }
@@ -103,13 +103,10 @@ export class MessageService {
       throw new NotFoundError('Message not found');
     }
 
-    // Update read status
-    if (!message.readBy.some(r => r.user.toString() === userId)) {
-      message.readBy.push({
-        user: userId,
-        readAt: new Date()
-      });
-      message.status = 'read';
+    // ✅ FIXED: Use 'seenBy' not 'readBy'
+    if (!message.seenBy.some(s => s.userId.toString() === userId.toString())) {
+      message.seenBy.push({ userId, timestamp: new Date() });
+      message.status = 'seen'; // ✅ 'seen' not 'read'
       await message.save();
     }
 
@@ -126,7 +123,7 @@ export class MessageService {
       throw new NotFoundError('Message not found');
     }
 
-    if (message.sender.toString() !== userId) {
+    if (message.senderId.toString() !== userId) {
       throw new BadRequestError('You can only delete your own messages');
     }
 
@@ -149,11 +146,11 @@ export class MessageService {
 
     // Remove existing reaction from this user
     message.reactions = message.reactions.filter(
-      r => r.user.toString() !== userId
+      r => r.userId.toString() !== userId.toString()
     );
 
     // Add new reaction
-    message.reactions.push({ user: userId, emoji });
+    message.reactions.push({ userId, emoji, timestamp: new Date() });
     await message.save();
 
     return message;

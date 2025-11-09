@@ -6,6 +6,7 @@ import { messageQueue } from './managers/MessageQueue.js';
 import { SendMessageCommand } from './commands/SendMessageCommand.js';
 import { TypingCommand } from './commands/typingCommand.js';
 import { pubClient, subClient } from '../config/redis.js';
+import Conversation from '../models/Conversation.js';
 
 /**
  * Initialize Socket.IO with modular architecture
@@ -53,6 +54,48 @@ export const initializeSocket = (httpServer) => {
       });
 
       // ================== EVENT HANDLERS ==================
+
+      /**
+       * Create conversation (for testing)
+       */
+      socket.on('conversation:create', async (data) => {
+        try {
+          const { type, participantIds } = data;
+
+          // Create conversation with the user as owner
+          const conversation = await Conversation.create({
+            type: type || 'direct',
+            participants: [
+              {
+                user: userId,
+                role: 'owner'
+              }
+            ],
+            createdBy: userId
+          });
+
+          // Auto-join the conversation room
+          socket.join(`conversation:${conversation._id}`);
+
+          // Emit success
+          socket.emit('conversation:created', {
+            conversation: {
+              _id: conversation._id,
+              type: conversation.type,
+              participants: conversation.participants,
+              createdAt: conversation.createdAt
+            }
+          });
+
+          console.log(`📂 Conversation created: ${conversation._id} by user ${userId}`);
+        } catch (error) {
+          console.error('conversation:create error:', error);
+          socket.emit('error', {
+            event: 'conversation:create',
+            message: error.message
+          });
+        }
+      });
 
       /**
        * Send message
