@@ -1,11 +1,13 @@
+// api/src/sockets/commands/SendMessageCommand.js
 import { messageService } from '../../services/message.service.js';
 import { connectionManager } from '../managers/ConnectionManager.js';
-import { messageQueue } from '../managers/MessageQueue.js';
+import { queueMessageDelivery } from '../../queues/messageDeliveryQueue.js';
 import Conversation from '../../models/Conversation.js';
+import { cacheService } from '../../services/cache.service.js';
 
 /**
  * SendMessageCommand - Handles sending messages via WebSocket
- * Command Pattern for modular event handling
+ * Uses BullMQ for reliable delivery with retry logic
  */
 export class SendMessageCommand {
   constructor(io) {
@@ -17,7 +19,7 @@ export class SendMessageCommand {
    */
   async execute(socket, data) {
     try {
-      const { conversationId, content, type = 'text', metadata = {} } = data;
+      const { conversationId, content, type = 'text', metadata = {}, replyTo } = data;
       const senderId = socket.userId;
 
       // Validate input
@@ -28,79 +30,127 @@ export class SendMessageCommand {
         });
       }
 
-      // Create message
+      // Create message in database
       const message = await messageService.createMessage({
         senderId,
         conversationId,
         content,
         type,
-        metadata
+        metadata,
+        replyTo,
       });
 
-      // Get conversation participants
-      const conversation = await Conversation.findById(conversationId);
-      const recipients = conversation.participants
-        .map(p => p.user.toString())
-        .filter(id => id !== senderId);
+      // Get conversation participants (with caching)
+      let participants = await cacheService.getConversationParticipants(conversationId);
+      
+      if (!participants) {
+        const conversation = await Conversation.findById(conversationId)
+          .select('participants')
+          .lean();
+        
+        if (!conversation) {
+          throw new Error('Conversation not found');
+        }
+        
+        participants = conversation.participants.map(p => p.user.toString());
+        await cacheService.cacheConversationParticipants(conversationId, participants);
+      }
 
-      // Emit to sender (confirmation)
+      const recipients = participants.filter(id => id !== senderId);
+
+      // Format message for transmission
+      const formattedMessage = await this.formatMessage(message);
+
+      // Emit confirmation to sender immediately
       socket.emit('message:sent', {
-        tempId: data.tempId, // Client-side temporary ID
-        message: this.formatMessage(message)
+        tempId: data.tempId, // Client-side temporary ID for optimistic updates
+        message: formattedMessage,
       });
 
-      // Emit to online recipients
+      // Deliver to recipients
       for (const recipientId of recipients) {
-        const recipientSockets = connectionManager.getUserSockets(recipientId);
+        const isOnline = await connectionManager.isUserOnline(recipientId);
 
-        if (recipientSockets.length > 0) {
-          // User is online - send immediately
-          recipientSockets.forEach(recipientSocket => {
-            recipientSocket.emit('message:received', {
-              message: this.formatMessage(message)
-            });
+        if (isOnline) {
+          // User is online - emit via pub/sub for cross-instance delivery
+          await connectionManager.emitToUser(recipientId, 'message:new', {
+            message: formattedMessage,
           });
 
           // Mark as delivered
           await messageService.markAsDelivered(message._id, recipientId);
         } else {
-          // User is offline - queue message
-          await messageQueue.enqueue(recipientId, {
-            event: 'message:received',
-            message: this.formatMessage(message)
-          });
+          // User is offline - queue for delivery with retry
+          await queueMessageDelivery(
+            recipientId,
+            'message:new',
+            { message: formattedMessage },
+            message._id.toString(),
+            1 // Priority (1 = normal)
+          );
         }
       }
 
-      console.log(`✉️ Message sent: ${message._id} (${type})`);
+      console.log(`✉️ Message ${message._id} sent to ${recipients.length} recipients`);
+
     } catch (error) {
       console.error('SendMessageCommand error:', error);
       socket.emit('error', {
         event: 'message:send',
-        message: error.message
+        message: error.message || 'Failed to send message'
       });
     }
   }
 
   /**
-   * Format message for client
+   * Format message for client with populated fields
    */
-  formatMessage(message) {
+  async formatMessage(message) {
+    // Populate sender if not already populated
+    if (!message.senderId?.displayName) {
+      await message.populate('senderId', 'displayName avatar username');
+    }
+
+    // Populate reply if exists
+    if (message.replyTo && !message.replyTo.content) {
+      await message.populate({
+        path: 'replyTo',
+        select: 'content senderId type createdAt',
+        populate: {
+          path: 'senderId',
+          select: 'displayName avatar',
+        },
+      });
+    }
+
     return {
       id: message._id,
       clientMsgId: message.clientMsgId,
-      conversationId: message.conversationId, // ✅ NEW
+      conversationId: message.conversationId,
       sender: {
-        id: message.senderId?._id || message.senderId, // ✅ NEW
-        displayName: message.senderId?.displayName,
-        avatar: message.senderId?.avatar?.url
+        id: message.senderId._id,
+        displayName: message.senderId.displayName,
+        avatar: message.senderId.avatar?.url || null,
+        username: message.senderId.username || null,
       },
       content: message.content,
       type: message.type,
       metadata: message.metadata,
+      media: message.media,
       status: message.status,
+      replyTo: message.replyTo ? {
+        id: message.replyTo._id,
+        content: message.replyTo.content,
+        type: message.replyTo.type,
+        sender: {
+          displayName: message.replyTo.senderId?.displayName,
+          avatar: message.replyTo.senderId?.avatar?.url,
+        },
+      } : null,
+      reactions: message.reactions,
+      edited: message.edited,
       createdAt: message.createdAt,
-      isDeleted: message.isDeleted
+      updatedAt: message.updatedAt,
     };
   }
 }

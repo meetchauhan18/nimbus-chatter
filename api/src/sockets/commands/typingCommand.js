@@ -1,5 +1,6 @@
-import { connectionManager } from '../managers/ConnectionManager.js';
-import Conversation from '../../models/Conversation.js';
+import { connectionManager } from "../managers/ConnectionManager.js";
+import Conversation from "../../models/Conversation.js";
+import { cacheService } from "../../services/cache.service.js";
 
 /**
  * TypingCommand - Handles typing indicators
@@ -19,23 +20,37 @@ export class TypingCommand {
       const userId = socket.userId;
 
       if (!conversationId) {
-        return socket.emit('error', {
-          event: 'typing:start',
-          message: 'Conversation ID is required'
+        return socket.emit("error", {
+          event: "typing:start",
+          message: "Conversation ID is required",
         });
       }
 
-      // Verify user is in conversation
-      const conversation = await Conversation.findById(conversationId);
-      if (!conversation) {
-        return;
+      // Try cache first
+      let participants =
+        await cacheService.getConversationParticipants(conversationId);
+
+      if (!participants) {
+        // Cache miss - query database
+        const conversation = await Conversation.findById(conversationId)
+          .select("participants")
+          .lean();
+
+        if (!conversation) {
+          return;
+        }
+
+        participants = conversation.participants.map((p) => p.user.toString());
+
+        // Cache for next time
+        await cacheService.cacheConversationParticipants(
+          conversationId,
+          participants
+        );
       }
 
-      const isParticipant = conversation.participants.some(
-        p => p.user.toString() === userId
-      );
-
-      if (!isParticipant) {
+      // Verify user is participant
+      if (!participants.includes(userId)) {
         return;
       }
 
@@ -46,16 +61,14 @@ export class TypingCommand {
       }
 
       // Emit to other participants
-      const recipients = conversation.participants
-        .map(p => p.user.toString())
-        .filter(id => id !== userId);
+      const recipients = participants.filter((id) => id !== userId);
 
       for (const recipientId of recipients) {
         const recipientSockets = connectionManager.getUserSockets(recipientId);
-        recipientSockets.forEach(recipientSocket => {
-          recipientSocket.emit('typing:start', {
+        recipientSockets.forEach((recipientSocket) => {
+          recipientSocket.emit("typing:start", {
             conversationId,
-            userId
+            userId,
           });
         });
       }
@@ -67,7 +80,7 @@ export class TypingCommand {
 
       this.typingTimers.set(timerKey, timer);
     } catch (error) {
-      console.error('TypingCommand handleStart error:', error);
+      console.error("TypingCommand handleStart error:", error);
     }
   }
 
@@ -97,20 +110,20 @@ export class TypingCommand {
       }
 
       const recipients = conversation.participants
-        .map(p => p.user.toString())
-        .filter(id => id !== userId);
+        .map((p) => p.user.toString())
+        .filter((id) => id !== userId);
 
       for (const recipientId of recipients) {
         const recipientSockets = connectionManager.getUserSockets(recipientId);
-        recipientSockets.forEach(recipientSocket => {
-          recipientSocket.emit('typing:stop', {
+        recipientSockets.forEach((recipientSocket) => {
+          recipientSocket.emit("typing:stop", {
             conversationId,
-            userId
+            userId,
           });
         });
       }
     } catch (error) {
-      console.error('TypingCommand handleStop error:', error);
+      console.error("TypingCommand handleStop error:", error);
     }
   }
 }

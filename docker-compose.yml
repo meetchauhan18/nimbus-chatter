@@ -44,6 +44,7 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      CLIENT_URL: http://localhost:5173
     volumes:
       - ./api:/app
       - api_node_modules:/app/node_modules
