@@ -77,7 +77,6 @@ const messageSchema = new mongoose.Schema(
       type: String,
       enum: ["pending", "sent", "delivered", "seen", "failed"],
       default: "sent",
-      index: true,
     },
 
     // 📬 Delivery tracking (multi-device & group safe)
@@ -114,7 +113,6 @@ const messageSchema = new mongoose.Schema(
     expiresAt: {
       type: Date,
       default: null,
-      index: { expires: "0s" }, // TTL index — MongoDB auto-deletes after expiry
     },
 
     // 🔐 E2E encryption data

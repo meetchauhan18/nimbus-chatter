@@ -1,203 +1,103 @@
-import express from "express";
-import cors from "cors";
-import helmet from "helmet";
-import compression from "compression";
-import morgan from "morgan";
-import rateLimit from "express-rate-limit";
-import mongoose from "mongoose";
-import http from "http";
-import { Server } from "socket.io";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
-import connectDB from "./config/database.js";
-import authRoutes from "./routes/authRoutes.js";
-import dotenv from "dotenv";
-import { cacheClient, pubClient, subClient } from "./config/redis.js";
-import { verifyAccessToken } from "./config/jwt.js";
-import Conversation from "./models/Conversation.js";
-import User from "./models/user.js";
-import { createAdapter } from "@socket.io/redis-adapter";
-import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
+import express from 'express';
+import http from 'http';
+import cors from 'cors';
+import helmet from 'helmet';
+import morgan from 'morgan';
+import compression from 'compression';
+import rateLimit from 'express-rate-limit';
+import dotenv from 'dotenv';
 
-// ✅ Get directory name for ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+// Config imports
 
-// ✅ Load .env from project root (works in Docker and local)
-dotenv.config({
-  path: join(__dirname, "../../.env"),
-});
+// Middleware imports
+import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
+
+// Route imports
+import authRoutes from './routes/authRoutes.js';
+
+// Socket imports
+import { initializeSocket } from './sockets/index.js';
+import connectDB from './config/database.js';
+import { connectRedis } from './config/redis.js';
+
+// Load environment variables
+dotenv.config({ path: '../.env' });
 
 const app = express();
+const httpServer = http.createServer(app);
 
-// ✅ Connect to MongoDB
-await connectDB();
-
-// ✅ Middleware stack
+// ================== MIDDLEWARE ==================
 app.use(helmet());
-app.use(
-  cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
-    credentials: true,
-  })
-);
+app.use(cors({
+  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  credentials: true
+}));
+app.use(morgan('dev'));
 app.use(compression());
-app.use(express.json({ limit: "10mb" }));
-app.use(morgan("dev"));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ✅ Rate limiting (protect API routes)
+// Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 min
-  max: 100, // limit each IP
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100 // limit each IP to 100 requests per windowMs
 });
-app.use("/api/", limiter);
+app.use('/api', limiter);
 
-app.get("/readiness", async (req, res) => {
-  const checks = { mongodb: false, redis: false };
+// ================== ROUTES ==================
+app.use('/api/auth', authRoutes);
 
-  try {
-    // Check MongoDB connection
-    checks.mongodb = mongoose.connection.readyState === 1;
-
-    // Check Redis connectivity
-    await cacheClient.ping();
-    checks.redis = true;
-
-    if (checks.mongodb && checks.redis) {
-      return res.json({ status: "ready", checks });
-    } else {
-      return res.status(503).json({ status: "not ready", checks });
-    }
-  } catch (error) {
-    return res.status(503).json({
-      status: "error",
-      checks,
-      error: error.message,
-    });
-  }
-});
-
-// ✅ Routes
-app.use("/api/auth", authRoutes);
-
-// ✅ Health check (existing)
-app.get("/health", (req, res) => {
+// Health check
+app.get('/health', (req, res) => {
   res.json({
-    status: "healthy",
+    status: 'healthy',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    environment: process.env.NODE_ENV || "development",
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
-// 🆕 404 Handler (ADD THIS)
+// 404 Handler
 app.use(notFoundHandler);
 
-// 🆕 Global Error Handler (ADD THIS - MUST BE LAST)
+// Global Error Handler (must be last)
 app.use(errorHandler);
 
-// ✅ Create HTTP server
-const server = http.createServer(app);
+// ================== SOCKET.IO ==================
+const io = initializeSocket(httpServer);
 
-// ✅ Initialize Socket.IO
-const io = new Server(server, {
-  cors: {
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
-    credentials: true,
-  },
-  transports: ["websocket", "polling"],
-  pingTimeout: 60000,
-  pingInterval: 25000,
-});
+// Make io accessible to routes (if needed)
+app.set('io', io);
 
-// In Socket.IO setup
-if (pubClient && subClient) {
-  try {
-    io.adapter(createAdapter(pubClient, subClient));
-    console.log("✅ Socket.IO Redis adapter initialized");
-  } catch (error) {
-    console.warn("⚠️ Redis adapter not initialized:", error.message);
-  }
-}
-
-// ✅ Socket.IO Authentication middleware
-io.use(async (socket, next) => {
-  try {
-    const token = socket.handshake.auth?.token;
-
-    if (!token) {
-      return next(new Error("Authentication token required"));
-    }
-
-    const decoded = verifyAccessToken(token);
-    const user = await User.findById(decoded.userId).select("-password");
-
-    if (!user) {
-      return next(new Error("User not found"));
-    }
-
-    socket.userId = user._id.toString();
-    socket.user = user;
-    next();
-  } catch (error) {
-    console.error("❌ Socket Auth Error:", error.message);
-    next(new Error("Authentication failed"));
-  }
-});
-
-// ✅ Socket.IO Connection handler
-io.on("connection", async (socket) => {
-  console.log(`⚡ User connected: ${socket.userId}`);
-
-  // Join personal room
-  socket.join(`user:${socket.userId}`);
-
-  // Update user online status
-  await User.findByIdAndUpdate(socket.userId, { status: "online" });
-
-  // Join all conversation rooms
-  const conversations = await Conversation.find({
-    participants: socket.userId,
-  }).select("_id");
-
-  conversations.forEach((conv) => {
-    socket.join(`conversation:${conv._id}`);
-  });
-
-  // Broadcast that the user is online
-  socket.broadcast.emit("user:online", { userId: socket.userId });
-
-  // ✅ Handle disconnection
-  socket.on("disconnect", async () => {
-    console.log(`❌ User disconnected: ${socket.userId}`);
-
-    // Delay before marking offline (to handle quick reconnects)
-    setTimeout(async () => {
-      const sockets = await io.in(`user:${socket.userId}`).fetchSockets();
-
-      if (sockets.length === 0) {
-        await User.findByIdAndUpdate(socket.userId, {
-          status: "offline",
-          lastSeen: new Date(),
-        });
-
-        socket.broadcast.emit("user:offline", {
-          userId: socket.userId,
-          lastSeen: new Date(),
-        });
-      }
-    }, 120000); // 2 minutes
-  });
-});
-
-// ✅ Start server
+// ================== START SERVER ==================
 const PORT = process.env.PORT || 4000;
 
-server.listen(PORT, () => {
-  console.log(`🚀 API server running on port ${PORT}`);
-  console.log(`🔌 WebSocket server ready`);
-});
+const startServer = async () => {
+  try {
+    // Connect to MongoDB
+    await connectDB();
+    
+    // Connect to Redis
+    await connectRedis();
+    
+    // Start HTTP server
+    httpServer.listen(PORT, () => {
+      console.log(`🚀 API server running on port ${PORT}`);
+      console.log(`🔌 WebSocket server ready`);
+      console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
+    });
+  } catch (error) {
+    console.error('❌ Server startup failed:', error);
+    process.exit(1);
+  }
+};
 
-// ✅ Export for use in other modules
-export { io };
-export default app;
+startServer();
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  httpServer.close(() => {
+    console.log('HTTP server closed');
+  });
+});
