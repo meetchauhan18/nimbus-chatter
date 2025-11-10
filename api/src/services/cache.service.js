@@ -25,8 +25,10 @@ class CacheService {
   /**
    * Cache user profile
    */
+  // Change all references from phone to email
   async cacheUser(userId, userData) {
     const key = `user:${userId}`;
+    // Ensure userData contains email instead of phone
     try {
       await this.redis.setex(
         key,

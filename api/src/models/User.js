@@ -5,33 +5,36 @@ import crypto from "crypto";
 const userSchema = new mongoose.Schema(
   {
     // 📱 Primary Identifier
-    phone: {
+    email: {
       type: String,
       required: true,
-      unique: true, // creates index automatically
+      unique: true,
       trim: true,
+      lowercase: true,
       validate: {
-        validator: (v) => /^\+[1-9]\d{1,14}$/.test(v),
-        message: "Phone must be valid E.164 format",
+        validator: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
+        message: "Invalid email format",
       },
+      index: true,
     },
 
     // 🧑‍💼 Profile Information
     username: {
       type: String,
+      required: true, // Changed from optional to required
       trim: true,
-      unique: true, // creates index automatically
-      sparse: true,
+      unique: true,
+      sparse: false, // Changed from sparse: true
       minlength: 3,
       maxlength: 30,
       match: [
         /^[a-zA-Z0-9._-]+$/,
         "Username can only contain letters, numbers, dots, underscores, and hyphens",
       ],
+      index: true,
     },
     displayName: {
       type: String,
-      required: true,
       trim: true,
       maxlength: 50,
     },
@@ -50,16 +53,18 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       required: true,
-      minlength: [8, 'Password must be at least 8 characters'],
+      minlength: [8, "Password must be at least 8 characters"],
       select: false,
       validate: {
         validator: function (password) {
           // Strong password: min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special char
-          const strongPasswordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^()_+=\-\[\]{};:'",.<>\/\\|`~])[A-Za-z\d@$!%*?&#^()_+=\-\[\]{};:'",.<>\/\\|`~]{8,}$/;
+          const strongPasswordRegex =
+            /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^()_+=\-\[\]{};:'",.<>\/\\|`~])[A-Za-z\d@$!%*?&#^()_+=\-\[\]{};:'",.<>\/\\|`~]{8,}$/;
           return strongPasswordRegex.test(password);
         },
-        message: 'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (@$!%*?&#, etc.)'
-      }
+        message:
+          "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (@$!%*?&#, etc.)",
+      },
     },
     passwordChangedAt: { type: Date },
 
@@ -138,8 +143,10 @@ const userSchema = new mongoose.Schema(
 //
 // ⚡ Indexes (no duplicates)
 //
-userSchema.index({ status: 1, lastSeen: -1 });
 userSchema.index({ "devices.deviceId": 1 });
+userSchema.index({ email: 1 });
+userSchema.index({ username: 1 });
+userSchema.index({ status: 1, lastSeen: -1 });
 
 //
 // 🧂 Password Hash Middleware

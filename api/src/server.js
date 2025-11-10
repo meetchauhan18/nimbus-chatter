@@ -6,15 +6,14 @@ import morgan from "morgan";
 import compression from "compression";
 import rateLimit from "express-rate-limit";
 import dotenv from "dotenv";
-import mongoSanitize from "express-mongo-sanitize";
-
-// Config imports
 
 // Middleware imports
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 
 // Route imports
 import authRoutes from "./routes/authRoutes.js";
+import conversationRoutes from "./routes/conversationRoutes.js";
+import userRoutes from "./routes/userRoutes.js";
 
 // Socket imports
 import { initializeSocket } from "./sockets/index.js";
@@ -33,11 +32,11 @@ const httpServer = http.createServer(app);
 // ================== MIDDLEWARE ==================
 app.use(helmet());
 const allowedOrigins = process.env.CLIENT_URL
-  ? process.env.CLIENT_URL.split(",").map((origin) => origin.trim())
+  ? process.env.CLIENT_URL?.split(",").map((origin) => origin.trim())
   : ["http://localhost:5173"];
 
 // In production, CLIENT_URL must be explicitly set
-if (process.env.NODE_ENV === "production" && allowedOrigins.length === 0) {
+if (process.env.NODE_ENV === "production" && allowedOrigins?.length === 0) {
   console.error("❌ SECURITY ERROR: CLIENT_URL must be set in production");
   process.exit(1);
 }
@@ -55,9 +54,9 @@ app.use(
 
       // Check if origin is allowed
       const origins =
-        allowedOrigins.length > 0 ? allowedOrigins : [developmentOrigin];
+        allowedOrigins?.length > 0 ? allowedOrigins : [developmentOrigin];
 
-      if (origins.includes(origin)) {
+      if (origins?.includes(origin)) {
         callback(null, true);
       } else {
         console.warn(
@@ -91,7 +90,7 @@ const authLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  skipSuccessfulRequests: false, // Count successful attempts too
+  skipSuccessfulRequests: true, // Count successful attempts too
   handler: (req, res) => {
     res.status(429).json({
       status: "error",
@@ -100,10 +99,11 @@ const authLimiter = rateLimit({
     });
   },
 });
-app.use("/api", authLimiter);
 
 // ================== ROUTES ==================
-app.use("/api/auth", authRoutes);
+app.use("/api/auth", authLimiter, authRoutes);
+app.use("/api/conversations", conversationRoutes);
+app.use("/api/users", userRoutes);
 
 // Health check
 app.get("/health", async (req, res) => {
@@ -113,7 +113,7 @@ app.get("/health", async (req, res) => {
         checkDBHealth(),
         checkRedisHealth(),
         getQueueStats(),
-        connectionManager.getStats(),
+        connectionManager?.getStats(),
       ]);
 
     const health = {

@@ -1,18 +1,19 @@
 import jwt from "jsonwebtoken";
 
-const generateAccessToken = (userId, phone) => {
-  return jwt.sign({ userId, phone }, process.env.JWT_SECRET, {
-    expiresIn: "15m",
+const generateAccessToken = (userId, email) => {
+  return jwt.sign({ userId, email }, process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_ACCESS_EXPIRY || '15m',
   });
 };
 
 const generateRefreshToken = (userId) => {
   return jwt.sign({ userId }, process.env.JWT_REFRESH_SECRET, {
-    expiresIn: "7d",
+    expiresIn: process.env.JWT_REFRESH_EXPIRY || '7d',
   });
 };
 
 const verifyAccessToken = (token) => {
+  console.log("🚀 ~ verifyAccessToken ~ token:", token)
   return jwt.verify(token, process.env.JWT_SECRET);
 };
 
