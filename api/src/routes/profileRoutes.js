@@ -32,7 +32,16 @@ router.patch(
 router.post(
   "/avatar",
   verifyAccessToken,
+  (req, res, next) => {
+    console.log("➡️ Multer upload called for avatar upload");
+    next();
+  },
   upload.single("avatar"),
+  (req, res, next) => {
+    console.log("✅ File received by multer:", req.file?.originalname);
+    console.log("📦 File details:", req.file);
+    next();
+  },
   uploadAvatar
 );
 router.delete("/avatar", verifyAccessToken, deleteAvatar);

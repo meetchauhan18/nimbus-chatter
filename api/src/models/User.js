@@ -172,18 +172,18 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
-// Generate email verification token
-userSchema.methods.generateEmailVerificationToken = function () {
-  const verificationToken = crypto.randomBytes(32).toString("hex");
+// Generate password reset token
+userSchema.methods.generatePasswordResetToken = function () {
+  const resetToken = crypto.randomBytes(32).toString("hex");
   
-  this.emailVerificationToken = crypto
+  this.passwordResetToken = crypto
     .createHash("sha256")
-    .update(verificationToken)
+    .update(resetToken)
     .digest("hex");
     
-  this.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+  this.passwordResetExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
   
-  return verificationToken;
+  return resetToken;
 };
 
 

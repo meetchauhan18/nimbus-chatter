@@ -32,15 +32,15 @@ export class ProfileService {
 
     // Filter only allowed fields
     Object.keys(updates).forEach((key) => {
-      if (allowedUpdates.includes(key)) {
+      if (allowedUpdates?.includes(key)) {
         actualUpdates[key] = updates[key];
       }
     });
 
     // Check username uniqueness if updating username
-    if (actualUpdates.username) {
-      const existingUser = await User.findOne({
-        username: actualUpdates.username,
+    if (actualUpdates?.username) {
+      const existingUser = await User?.findOne({
+        username: actualUpdates?.username,
         _id: { $ne: userId },
       });
 
@@ -49,7 +49,7 @@ export class ProfileService {
       }
     }
 
-    const user = await User.findByIdAndUpdate(
+    const user = await User?.findByIdAndUpdate(
       userId,
       { $set: actualUpdates },
       { new: true, runValidators: true }
@@ -68,16 +68,16 @@ export class ProfileService {
   async uploadAvatar(userId, file) {
     console.log("🚀 ~ ProfileService ~ uploadAvatar ~ file:", file)
     console.log("🚀 ~ ProfileService ~ uploadAvatar ~ userId:", userId)
-    const user = await User.findById(userId);
+    const user = await User?.findById(userId);
 
     if (!user) {
       throw new NotFoundError("User not found");
     }
 
     // Delete old avatar from Cloudinary if exists
-    if (user.avatar.publicId) {
+    if (user?.avatar?.publicId) {
       try {
-        await cloudinary.uploader.destroy(user.avatar.publicId);
+        await cloudinary.uploader.destroy(user?.avatar?.publicId);
       } catch (error) {
         console.error("Error deleting old avatar:", error);
       }
@@ -152,6 +152,7 @@ export class ProfileService {
    */
   async requestPasswordReset(email) {
     const user = await User.findOne({ email });
+    console.log("🚀 ~ ProfileService ~ requestPasswordReset ~ user:", user)
 
     if (!user) {
       // Don't reveal if user exists for security
@@ -160,6 +161,7 @@ export class ProfileService {
 
     // Generate reset token
     const resetToken = user.generatePasswordResetToken();
+    console.log("🚀 ~ ProfileService ~ requestPasswordReset ~ resetToken:", resetToken)
     await user.save({ validateBeforeSave: false });
 
     // Send email
@@ -186,6 +188,7 @@ export class ProfileService {
   async resetPassword(token, newPassword) {
     // Hash token to match stored version
     const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+    console.log("🚀 ~ ProfileService ~ resetPassword ~ hashedToken:", hashedToken)
 
     // Find user with valid token
     const user = await User.findOne({

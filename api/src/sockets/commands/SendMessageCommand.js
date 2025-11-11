@@ -48,12 +48,12 @@ export class SendMessageCommand {
       await message.populate("senderId", "displayName avatar username email");
 
       // Update conversation's last message
-      conversation.lastMessage = message._id;
+      conversation.lastMessage = message?._id;
       conversation.updatedAt = new Date();
       await conversation.save();
 
       // Get recipient IDs (all participants except sender)
-      const recipientIds = conversation.participants
+      const recipientIds = conversation?.participants
         .map((p) => p.user.toString())
         .filter((id) => id !== senderId.toString());
 

@@ -18,6 +18,7 @@ class EmailService {
    */
   async sendPasswordResetEmail(email, resetToken, username) {
     const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+    console.log("🚀 ~ EmailService ~ sendPasswordResetEmail ~ resetUrl:", resetUrl)
 
     const mailOptions = {
       from: process.env.EMAIL_FROM,
