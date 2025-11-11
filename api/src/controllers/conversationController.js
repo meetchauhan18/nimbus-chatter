@@ -20,7 +20,8 @@ export const getConversations = asyncHandler(async (req, res) => {
 
 export const createConversation = asyncHandler(async (req, res) => {
   const { participantIds, type, name } = req.body;
-  const creatorId = req.userId;
+  const creatorId = req.user.userId;
+  console.log("🚀 ~ creatorId:", creatorId)
 
   const conversation = await conversationService.createConversation({
     creatorId,
@@ -28,6 +29,7 @@ export const createConversation = asyncHandler(async (req, res) => {
     type: type || "direct",
     name,
   });
+  console.log("🚀 ~ conversation:", conversation)
 
   successResponse(res, conversation, "Conversation created", 201);
 });

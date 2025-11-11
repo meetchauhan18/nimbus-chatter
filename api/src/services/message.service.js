@@ -1,6 +1,7 @@
 import Message from "../models/Message.js";
 import Conversation from "../models/Conversation.js";
 import { NotFoundError, BadRequestError } from "../utils/AppError.js";
+import mongoose from "mongoose";
 
 /**
  * Message Service
@@ -16,6 +17,7 @@ export class MessageService {
     content,
     type = "text",
     metadata = {},
+    replyTo = null,
   }) {
     // Validate conversation exists
     const conversation = await Conversation.findById(conversationId);
@@ -37,11 +39,12 @@ export class MessageService {
     const message = await Message.create({
       clientMsgId: `${senderId}_${Date.now()}_${Math.random().toString(36)}`,
       conversationId,
-      senderId, // ✅ Correct field name
+      senderId,
       content,
       type,
       metadata: metadata || {},
       status: "sent",
+      replyTo,
     });
 
     // Update conversation's last message
@@ -50,8 +53,15 @@ export class MessageService {
       updatedAt: new Date(),
     });
 
-    // ✅ FIXED: Populate 'senderId' not 'sender'
-    await message.populate("senderId", "displayName avatar phone");
+    await message.populate("senderId", "displayName avatar phone username");
+
+    if (replyTo) {
+      await message.populate({
+        path: "replyTo",
+        select: "content senderId type",
+        populate: { path: "senderId", select: "displayName avatar" },
+      });
+    }
 
     return message;
   }
@@ -59,8 +69,12 @@ export class MessageService {
   /**
    * Get messages for a conversation (with pagination)
    */
-  async getMessages(conversationId, { before = null, limit = 50 }) {
-    const query = { conversationId }; // ✅ FIXED: Use 'conversationId' not 'conversation'
+  async getMessages(conversationId, userId, { before = null, limit = 50 }) {
+    const query = {
+      conversationId,
+      isDeleted: false,
+      deletedFor: { $ne: userId }, // Exclude messages deleted by this user
+    };
 
     // Cursor-based pagination
     if (before) {
@@ -70,7 +84,13 @@ export class MessageService {
     const messages = await Message.find(query)
       .sort({ createdAt: -1 })
       .limit(limit)
-      .populate("senderId", "displayName avatar phone") // ✅ FIXED
+      .populate("senderId", "displayName avatar phone username")
+      .populate({
+        path: "replyTo",
+        select: "content senderId type",
+        populate: { path: "senderId", select: "displayName avatar" },
+      })
+      .populate("reactions.userId", "displayName avatar")
       .lean();
 
     return {
@@ -82,22 +102,18 @@ export class MessageService {
   }
 
   /**
-   * Get messages with pagination
+   * Get messages with pagination (optimized)
    */
-  async getMessagesPaginated(conversationId, options = {}) {
-    const {
-      limit = 50,
-      before, // Timestamp cursor for pagination
-      after, // For loading newer messages
-      includeDeleted = false,
-    } = options;
+  async getMessagesPaginated(conversationId, userId, options = {}) {
+    const { limit = 50, before, after, includeDeleted = false } = options;
 
     // Build query
     const query = {
       conversationId: mongoose.Types.ObjectId(conversationId),
+      deletedFor: { $ne: userId }, // Exclude user-deleted messages
     };
 
-    // Exclude deleted messages unless specifically requested
+    // Exclude system-deleted messages unless requested
     if (!includeDeleted) {
       query.isDeleted = false;
     }
@@ -109,10 +125,8 @@ export class MessageService {
       query.createdAt = { $gt: new Date(after) };
     }
 
-    // Optimized query with projection
     const messages = await Message.find(query)
       .select({
-        // Include only necessary fields
         content: 1,
         type: 1,
         senderId: 1,
@@ -126,13 +140,10 @@ export class MessageService {
         edited: 1,
         deliveredTo: 1,
         seenBy: 1,
-        // Exclude heavy fields
-        encryption: 0,
-        deviceInfo: 0,
-        deletedFor: 0,
+        isDeleted: 1,
       })
-      .sort({ createdAt: before ? -1 : 1 }) // Sort based on direction
-      .limit(limit + 1) // Fetch one extra to check if there are more
+      .sort({ createdAt: before ? -1 : 1 })
+      .limit(limit + 1)
       .populate({
         path: "senderId",
         select: "displayName avatar phone username",
@@ -145,13 +156,12 @@ export class MessageService {
           select: "displayName avatar",
         },
       })
-      .lean(); // Convert to plain JS object for better performance
+      .populate("reactions.userId", "displayName avatar")
+      .lean();
 
-    // Check if there are more messages
     const hasMore = messages.length > limit;
     const result = hasMore ? messages.slice(0, limit) : messages;
 
-    // Reverse if fetching older messages
     if (before) {
       result.reverse();
     }
@@ -177,22 +187,19 @@ export class MessageService {
       throw new NotFoundError("Message not found");
     }
 
-    // ✅ FIXED: Use your schema's structure
-    if (
-      !message.deliveredTo.some(
-        (d) => d.userId.toString() === userId.toString()
-      )
-    ) {
-      message.deliveredTo.push({ userId, timestamp: new Date() });
-      message.status = "delivered";
-      await message.save();
+    // Don't mark sender's own message
+    if (message.senderId.toString() === userId.toString()) {
+      return message;
     }
+
+    message.markDelivered(userId); // Use model method
+    await message.save();
 
     return message;
   }
 
   /**
-   * Mark message as read
+   * Mark message as seen/read
    */
   async markAsRead(messageId, userId) {
     const message = await Message.findById(messageId);
@@ -201,40 +208,65 @@ export class MessageService {
       throw new NotFoundError("Message not found");
     }
 
-    // ✅ FIXED: Use 'seenBy' not 'readBy'
-    if (
-      !message.seenBy.some((s) => s.userId.toString() === userId.toString())
-    ) {
-      message.seenBy.push({ userId, timestamp: new Date() });
-      message.status = "seen"; // ✅ 'seen' not 'read'
-      await message.save();
+    // Don't mark sender's own message
+    if (message.senderId.toString() === userId.toString()) {
+      return message;
     }
 
-    return message;
-  }
-
-  async editMessage(messageId, userId, newContent) {
-    const message = await Message.findOne({ _id: messageId, senderId: userId });
-
-    if (!message) {
-      throw new NotFoundError("Message not found or unauthorized");
-    }
-
-    // Don't allow editing after 15 minutes
-    const fifteenMinutesAgo = Date.now() - 15 * 60 * 1000;
-    if (message.createdAt < fifteenMinutesAgo) {
-      throw new BadRequestError("Cannot edit messages older than 15 minutes");
-    }
-
-    message.content = newContent;
-    message.edited.isEdited = true;
-    message.edited.editedAt = new Date();
+    message.markSeen(userId); // Use model method
     await message.save();
 
     return message;
   }
+
   /**
-   * Delete message (soft delete)
+   * Mark all conversation messages as read
+   */
+  async markConversationAsRead(conversationId, userId) {
+    const result = await Message.updateMany(
+      {
+        conversationId,
+        senderId: { $ne: userId },
+        "seenBy.userId": { $ne: userId },
+        isDeleted: false,
+      },
+      {
+        $push: { seenBy: { userId, timestamp: new Date() } },
+        $set: { status: "seen" },
+      }
+    );
+
+    return result;
+  }
+
+  /**
+   * Edit message (uses model's canEdit method)
+   */
+  async editMessage(messageId, userId, newContent) {
+    const message = await Message.findById(messageId);
+
+    if (!message) {
+      throw new NotFoundError("Message not found");
+    }
+
+    // Use model's canEdit method
+    if (!message.canEdit(userId)) {
+      throw new BadRequestError(
+        "Cannot edit this message. Only sender can edit within 15 minutes."
+      );
+    }
+
+    message.content = newContent;
+    // Middleware will handle setting edited flags
+    await message.save();
+
+    await message.populate("senderId", "displayName avatar phone username");
+
+    return message;
+  }
+
+  /**
+   * Delete message for user (soft delete)
    */
   async deleteMessage(messageId, userId) {
     const message = await Message.findById(messageId);
@@ -243,12 +275,39 @@ export class MessageService {
       throw new NotFoundError("Message not found");
     }
 
-    if (message.senderId.toString() !== userId) {
+    if (!message.canDelete(userId)) {
       throw new BadRequestError("You can only delete your own messages");
     }
 
-    message.isDeleted = true;
-    message.content = "";
+    message.deleteForUser(userId); // Use model method
+    await message.save();
+
+    return message;
+  }
+
+  /**
+   * Permanently delete message (sender only, deletes for everyone)
+   */
+  async deleteMessageForEveryone(messageId, userId) {
+    const message = await Message.findById(messageId);
+
+    if (!message) {
+      throw new NotFoundError("Message not found");
+    }
+
+    if (message.senderId.toString() !== userId.toString()) {
+      throw new BadRequestError("Only sender can delete for everyone");
+    }
+
+    // Check time limit (e.g., 1 hour)
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    if (message.createdAt < oneHourAgo) {
+      throw new BadRequestError(
+        "Can only delete for everyone within 1 hour of sending"
+      );
+    }
+
+    message.permanentDelete(); // Use model method
     await message.save();
 
     return message;
@@ -264,14 +323,53 @@ export class MessageService {
       throw new NotFoundError("Message not found");
     }
 
-    // Remove existing reaction from this user
-    message.reactions = message.reactions.filter(
-      (r) => r.userId.toString() !== userId.toString()
-    );
+    if (message.isDeleted) {
+      throw new BadRequestError("Cannot react to deleted message");
+    }
 
-    // Add new reaction
-    message.reactions.push({ userId, emoji, timestamp: new Date() });
+    message.addReaction(userId, emoji); // Use model method
     await message.save();
+
+    await message.populate("reactions.userId", "displayName avatar username");
+
+    return message;
+  }
+
+  /**
+   * Remove reaction from message
+   */
+  async removeReaction(messageId, userId, emoji) {
+    const message = await Message.findById(messageId);
+
+    if (!message) {
+      throw new NotFoundError("Message not found");
+    }
+
+    message.removeReaction(userId, emoji); // Use model method
+    await message.save();
+
+    return message;
+  }
+
+  /**
+   * Get message by ID with full details
+   */
+  async getMessageById(messageId, userId) {
+    const message = await Message.findOne({
+      _id: messageId,
+      deletedFor: { $ne: userId },
+    })
+      .populate("senderId", "displayName avatar phone username")
+      .populate({
+        path: "replyTo",
+        select: "content senderId type",
+        populate: { path: "senderId", select: "displayName avatar" },
+      })
+      .populate("reactions.userId", "displayName avatar");
+
+    if (!message) {
+      throw new NotFoundError("Message not found");
+    }
 
     return message;
   }

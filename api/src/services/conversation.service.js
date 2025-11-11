@@ -36,6 +36,7 @@ export class ConversationService {
     type = "direct",
     name,
   }) {
+    console.log("🚀 ~ ConversationService ~ createConversation ~ participantIds:", participantIds)
     // Validate direct conversation has exactly 2 participants
     if (type === "direct" && participantIds.length !== 2) {
       throw new BadRequestError(
@@ -49,6 +50,7 @@ export class ConversationService {
         type: "direct",
         "participants.user": { $all: participantIds },
       });
+      console.log("🚀 ~ ConversationService ~ createConversation ~ existingConversation:", existingConversation)
 
       if (existingConversation) {
         return existingConversation;
@@ -65,6 +67,7 @@ export class ConversationService {
       })),
       createdBy: creatorId,
     });
+    console.log("🚀 ~ ConversationService ~ createConversation ~ conversation:", conversation)
 
     // Populate user details - FIXED
     await conversation.populate(
@@ -72,6 +75,7 @@ export class ConversationService {
       "displayName avatar email username"
     );
 
+    console.log("🚀 ~ ConversationService ~ createConversation ~ conversation:", conversation)
     return conversation;
   }
 

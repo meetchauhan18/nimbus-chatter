@@ -230,6 +230,301 @@ export const initializeSocket = (httpServer) => {
         }
       });
 
+      // ================== 🆕 PHASE 3: EDIT/DELETE/REACTIONS ==================
+
+      /**
+       * ✏️ Edit message
+       */
+      socket.on("message:edit", async (data) => {
+        try {
+          const { messageId, content, conversationId } = data;
+
+          console.log("🚀 ~ message:edit ~ messageId:", messageId);
+          console.log("🚀 ~ message:edit ~ content:", content);
+
+          // Edit the message
+          const message = await messageService.editMessage(
+            messageId,
+            userId,
+            content
+          );
+
+          // Get conversation to notify participants
+          const conversation = await Conversation.findById(conversationId)
+            .select("participants")
+            .lean();
+
+          if (!conversation) {
+            return socket.emit("error", {
+              event: "message:edit",
+              message: "Conversation not found",
+            });
+          }
+
+          // Emit to all participants (including sender for multi-device sync)
+          const allParticipants = conversation.participants.map((p) =>
+            p.user.toString()
+          );
+
+          for (const participantId of allParticipants) {
+            await connectionManager.emitToUser(
+              participantId,
+              "message:edited",
+              {
+                messageId: message._id,
+                conversationId,
+                content: message.content,
+                edited: message.edited,
+                updatedAt: message.updatedAt,
+              }
+            );
+          }
+
+          // Acknowledge to sender
+          socket.emit("message:edit:success", {
+            messageId: message._id,
+            conversationId,
+          });
+        } catch (error) {
+          console.error("message:edit error:", error);
+          socket.emit("error", {
+            event: "message:edit",
+            message: error.message,
+          });
+        }
+      });
+
+      /**
+       * 🗑️ Delete message (for current user)
+       */
+      socket.on("message:delete", async (data) => {
+        try {
+          const { messageId, conversationId } = data;
+
+          console.log("🚀 ~ message:delete ~ messageId:", messageId);
+
+          // Delete message for user
+          await messageService.deleteMessage(messageId, userId);
+
+          // Only notify the user who deleted it (per-user delete)
+          socket.emit("message:deleted", {
+            messageId,
+            conversationId,
+            deletedFor: userId,
+          });
+        } catch (error) {
+          console.error("message:delete error:", error);
+          socket.emit("error", {
+            event: "message:delete",
+            message: error.message,
+          });
+        }
+      });
+
+      /**
+       * 🗑️ Delete message for everyone (sender only, within 1 hour)
+       */
+      socket.on("message:delete:everyone", async (data) => {
+        try {
+          const { messageId, conversationId } = data;
+
+          console.log("🚀 ~ message:delete:everyone ~ messageId:", messageId);
+
+          // Delete message for everyone
+          const message = await messageService.deleteMessageForEveryone(
+            messageId,
+            userId
+          );
+
+          // Get conversation to notify all participants
+          const conversation = await Conversation.findById(conversationId)
+            .select("participants")
+            .lean();
+
+          if (!conversation) {
+            return socket.emit("error", {
+              event: "message:delete:everyone",
+              message: "Conversation not found",
+            });
+          }
+
+          // Emit to all participants
+          const allParticipants = conversation.participants.map((p) =>
+            p.user.toString()
+          );
+
+          for (const participantId of allParticipants) {
+            await connectionManager.emitToUser(
+              participantId,
+              "message:deleted:everyone",
+              {
+                messageId: message._id,
+                conversationId,
+                deletedBy: userId,
+                deletedAt: message.deletedAt || new Date(),
+              }
+            );
+          }
+        } catch (error) {
+          console.error("message:delete:everyone error:", error);
+          socket.emit("error", {
+            event: "message:delete:everyone",
+            message: error.message,
+          });
+        }
+      });
+
+      /**
+       * 😀 Add reaction to message
+       */
+      socket.on("message:react", async (data) => {
+        try {
+          const { messageId, emoji, conversationId } = data;
+
+          console.log("🚀 ~ message:react ~ messageId:", messageId);
+          console.log("🚀 ~ message:react ~ emoji:", emoji);
+
+          // Add reaction
+          const message = await messageService.addReaction(
+            messageId,
+            userId,
+            emoji
+          );
+
+          // Get conversation to notify participants
+          const conversation = await Conversation.findById(conversationId)
+            .select("participants")
+            .lean();
+
+          if (!conversation) {
+            return socket.emit("error", {
+              event: "message:react",
+              message: "Conversation not found",
+            });
+          }
+
+          // Emit to all participants
+          const allParticipants = conversation.participants.map((p) =>
+            p.user.toString()
+          );
+
+          for (const participantId of allParticipants) {
+            await connectionManager.emitToUser(
+              participantId,
+              "message:reaction",
+              {
+                messageId: message._id,
+                conversationId,
+                reactions: message.reactions,
+                addedBy: userId,
+                emoji,
+              }
+            );
+          }
+        } catch (error) {
+          console.error("message:react error:", error);
+          socket.emit("error", {
+            event: "message:react",
+            message: error.message,
+          });
+        }
+      });
+
+      /**
+       * 🚫 Remove reaction from message
+       */
+      socket.on("message:unreact", async (data) => {
+        try {
+          const { messageId, emoji, conversationId } = data;
+
+          console.log("🚀 ~ message:unreact ~ messageId:", messageId);
+          console.log("🚀 ~ message:unreact ~ emoji:", emoji);
+
+          // Remove reaction
+          const message = await messageService.removeReaction(
+            messageId,
+            userId,
+            emoji
+          );
+
+          // Get conversation to notify participants
+          const conversation = await Conversation.findById(conversationId)
+            .select("participants")
+            .lean();
+
+          if (!conversation) {
+            return socket.emit("error", {
+              event: "message:unreact",
+              message: "Conversation not found",
+            });
+          }
+
+          // Emit to all participants
+          const allParticipants = conversation.participants.map((p) =>
+            p.user.toString()
+          );
+
+          for (const participantId of allParticipants) {
+            await connectionManager.emitToUser(
+              participantId,
+              "message:reaction",
+              {
+                messageId: message._id,
+                conversationId,
+                reactions: message.reactions,
+                removedBy: userId,
+                emoji,
+              }
+            );
+          }
+        } catch (error) {
+          console.error("message:unreact error:", error);
+          socket.emit("error", {
+            event: "message:unreact",
+            message: error.message,
+          });
+        }
+      });
+
+      /**
+       * 📬 Mark message as delivered
+       */
+      socket.on("message:delivered", async (data) => {
+        try {
+          const { messageId, conversationId } = data;
+
+          await messageService.markAsDelivered(messageId, userId);
+
+          // Get message sender to notify them
+          const conversation = await Conversation.findById(conversationId)
+            .select("participants")
+            .lean();
+
+          if (conversation) {
+            const otherParticipants = conversation.participants
+              .map((p) => p.user.toString())
+              .filter((id) => id !== userId);
+
+            for (const participantId of otherParticipants) {
+              await connectionManager.emitToUser(
+                participantId,
+                "message:delivered",
+                {
+                  messageId,
+                  conversationId,
+                  deliveredTo: userId,
+                  deliveredAt: new Date(),
+                }
+              );
+            }
+          }
+        } catch (error) {
+          console.error("message:delivered error:", error);
+        }
+      });
+
+      // ================== TYPING EVENTS ==================
+
       // ================== TYPING EVENTS ==================
 
       socket.on("typing:start", async (data) => {

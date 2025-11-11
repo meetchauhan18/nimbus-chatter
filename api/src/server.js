@@ -15,6 +15,7 @@ import authRoutes from "./routes/authRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import profileRoutes from "./routes/profileRoutes.js";
+import messageRoutes from "./routes/messageRoutes.js";
 
 // Socket imports
 import { initializeSocket } from "./sockets/index.js";
@@ -106,6 +107,7 @@ app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/conversations", conversationRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/profile", profileRoutes);
+app.use("/api/messages", messageRoutes);
 
 // Health check
 app.get("/health", async (req, res) => {
