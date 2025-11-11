@@ -6,25 +6,23 @@ export class ConversationService {
    * Get user's conversations with pagination
    */
   async getUserConversations(userId, options = {}) {
-    console.log("🚀 ~ ConversationService ~ getUserConversations ~ userId:", userId)
     const { limit = 50, offset = 0 } = options;
 
     const conversations = await Conversation.find({
       "participants.user": userId,
     })
-      .populate("participants.user", "displayName avatar phone")
+      .populate("participants.user", "displayName avatar email username") // FIXED: Removed phone, added email and username
       .populate({
         path: "lastMessage",
         select: "content senderId createdAt type",
         populate: {
           path: "senderId",
-          select: "displayName avatar",
+          select: "displayName avatar username", // FIXED: Added username
         },
       })
       .sort({ updatedAt: -1 })
       .skip(offset)
       .limit(limit);
-    console.log("🚀 ~ ConversationService ~ getUserConversations ~ conversations:", conversations)
 
     return conversations;
   }
@@ -38,75 +36,59 @@ export class ConversationService {
     type = "direct",
     name,
   }) {
-    // Validation
-    if (type === "direct" && participantIds.length !== 1) {
+    // Validate direct conversation has exactly 2 participants
+    if (type === "direct" && participantIds.length !== 2) {
       throw new BadRequestError(
-        "Direct conversations require exactly 1 other participant"
+        "Direct conversation must have exactly 2 participants"
       );
-    }
-
-    if (type === "group" && !name) {
-      throw new BadRequestError("Group conversations require a name");
     }
 
     // Check if direct conversation already exists
     if (type === "direct") {
-      const existing = await Conversation.findOne({
+      const existingConversation = await Conversation.findOne({
         type: "direct",
-        "participants.user": { $all: [creatorId, participantIds[0]] },
+        "participants.user": { $all: participantIds },
       });
 
-      if (existing) {
-        // Populate and return existing conversation
-        await existing.populate(
-          "participants.user",
-          "displayName avatar phone"
-        );
-        return existing;
+      if (existingConversation) {
+        return existingConversation;
       }
     }
-
-    // Create participants array
-    const participants = [
-      {
-        user: creatorId,
-        role: type === "group" ? "admin" : "member",
-        joinedAt: new Date(),
-      },
-      ...participantIds.map((id) => ({
-        user: id,
-        role: "member",
-        joinedAt: new Date(),
-      })),
-    ];
 
     // Create conversation
     const conversation = await Conversation.create({
       type,
-      name: type === "group" ? name : null,
-      participants,
+      name: type === "group" ? name : undefined,
+      participants: participantIds.map((userId) => ({
+        user: userId,
+        role: userId === creatorId ? "admin" : "member",
+      })),
+      createdBy: creatorId,
     });
 
-    // Populate before returning
+    // Populate user details - FIXED
     await conversation.populate(
       "participants.user",
-      "displayName avatar phone"
+      "displayName avatar email username"
     );
 
     return conversation;
   }
 
   /**
-   * Get single conversation with full details
+   * Get conversation by ID
    */
-  async getConversation(conversationId, userId) {
-    const conversation = await Conversation.findById(conversationId)
-      .populate("participants.user", "displayName avatar phone status")
+  async getConversationById(conversationId, userId) {
+    const conversation = await Conversation.findOne({
+      _id: conversationId,
+      "participants.user": userId,
+    })
+      .populate("participants.user", "displayName avatar email username status") // FIXED
       .populate({
         path: "lastMessage",
         populate: {
           path: "senderId",
-          select: "displayName avatar",
+          select: "displayName avatar username", // FIXED
         },
       });
 
@@ -114,46 +96,78 @@ export class ConversationService {
       throw new NotFoundError("Conversation not found");
     }
 
-    // Verify user is participant
-    const isParticipant = conversation.participants.some(
-      (p) => p.user._id.toString() === userId
+    return conversation;
+  }
+
+  /**
+   * Add participants to group conversation
+   */
+  async addParticipants(conversationId, userId, participantIds) {
+    const conversation = await Conversation.findOne({
+      _id: conversationId,
+      type: "group",
+    });
+
+    if (!conversation) {
+      throw new NotFoundError("Group conversation not found");
+    }
+
+    // Check if user is admin
+    const userParticipant = conversation.participants.find(
+      (p) => p.user.toString() === userId.toString()
     );
 
-    if (!isParticipant) {
-      throw new BadRequestError(
-        "You are not a participant in this conversation"
-      );
+    if (!userParticipant || userParticipant.role !== "admin") {
+      throw new BadRequestError("Only admins can add participants");
     }
+
+    // Add new participants
+    const newParticipants = participantIds.map((id) => ({
+      user: id,
+      role: "member",
+    }));
+
+    conversation.participants.push(...newParticipants);
+    await conversation.save();
+
+    // FIXED: Populate with correct fields
+    await conversation.populate(
+      "participants.user",
+      "displayName avatar email username"
+    );
 
     return conversation;
   }
 
   /**
-   * Update conversation settings
+   * Remove participant from group
    */
-  async updateConversation(conversationId, userId, updates) {
-    const conversation = await this.getConversation(conversationId, userId);
-
-    // Only admins can update group conversations
-    if (conversation.type === "group") {
-      const participant = conversation.participants.find(
-        (p) => p.user._id.toString() === userId
-      );
-
-      if (participant.role !== "admin") {
-        throw new BadRequestError("Only admins can update group settings");
-      }
-    }
-
-    // Allowed updates
-    const allowedUpdates = ["name", "isArchived"];
-    Object.keys(updates).forEach((key) => {
-      if (allowedUpdates.includes(key)) {
-        conversation[key] = updates[key];
-      }
+  async removeParticipant(conversationId, userId, targetUserId) {
+    const conversation = await Conversation.findOne({
+      _id: conversationId,
+      type: "group",
     });
 
+    if (!conversation) {
+      throw new NotFoundError("Group conversation not found");
+    }
+
+    // Check if user is admin
+    const userParticipant = conversation.participants.find(
+      (p) => p.user.toString() === userId.toString()
+    );
+
+    if (!userParticipant || userParticipant.role !== "admin") {
+      throw new BadRequestError("Only admins can remove participants");
+    }
+
+    // Remove participant
+    conversation.participants = conversation.participants.filter(
+      (p) => p.user.toString() !== targetUserId.toString()
+    );
+
     await conversation.save();
+
     return conversation;
   }
 }

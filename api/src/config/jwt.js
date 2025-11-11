@@ -13,7 +13,6 @@ const generateRefreshToken = (userId) => {
 };
 
 const verifyAccessToken = (token) => {
-  console.log("🚀 ~ verifyAccessToken ~ token:", token)
   return jwt.verify(token, process.env.JWT_SECRET);
 };
 

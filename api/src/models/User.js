@@ -18,13 +18,13 @@ const userSchema = new mongoose.Schema(
       index: true,
     },
 
-    // 🧑‍💼 Profile Information
+    // 🧑💼 Profile Information
     username: {
       type: String,
-      required: true, // Changed from optional to required
+      required: true,
       trim: true,
       unique: true,
-      sparse: false, // Changed from sparse: true
+      sparse: false,
       minlength: 3,
       maxlength: 30,
       match: [
@@ -33,69 +33,48 @@ const userSchema = new mongoose.Schema(
       ],
       index: true,
     },
+
     displayName: {
       type: String,
       trim: true,
       maxlength: 50,
     },
+
     about: {
       type: String,
       trim: true,
       maxlength: 150,
       default: "Hey there! I am using Nimbus Messenger.",
     },
+
     avatar: {
       url: { type: String, default: null },
-      publicId: { type: String, default: null }, // Cloudinary ID
+      publicId: { type: String, default: null },
     },
 
     // 🔐 Authentication
     password: {
       type: String,
       required: true,
-      minlength: [8, "Password must be at least 8 characters"],
-      select: false,
-      validate: {
-        validator: function (password) {
-          // Strong password: min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special char
-          const strongPasswordRegex =
-            /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^()_+=\-\[\]{};:'",.<>\/\\|`~])[A-Za-z\d@$!%*?&#^()_+=\-\[\]{};:'",.<>\/\\|`~]{8,}$/;
-          return strongPasswordRegex.test(password);
-        },
-        message:
-          "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (@$!%*?&#, etc.)",
-      },
+      select: false, // Don't return password by default
+      minlength: 8,
+      maxlength: 128,
+      // REMOVED THE VALIDATOR - Validation happens in Joi schema BEFORE hashing
     },
-    passwordChangedAt: { type: Date },
 
-    // 🔑 Security Keys (for E2E and devices)
-    publicKey: { type: String, default: null },
-    deviceKeys: [
-      {
-        deviceId: { type: String, required: true },
-        publicKey: { type: String, required: true },
-        lastActive: { type: Date, default: Date.now },
-      },
-    ],
-
-    // 🟢 Presence
+    // 🌐 Status & Presence
     status: {
       type: String,
-      enum: ["online", "offline", "away"],
+      enum: ["online", "offline", "away", "busy"],
       default: "offline",
     },
-    lastSeen: { type: Date, default: Date.now },
 
-    // 👥 Contacts / Social Graph
-    contacts: [
-      {
-        user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-        isBlocked: { type: Boolean, default: false },
-        lastInteraction: { type: Date, default: Date.now },
-      },
-    ],
+    lastSeen: {
+      type: Date,
+      default: Date.now,
+    },
 
-    // 🔏 Privacy
+    // 🔒 Privacy Settings
     privacy: {
       lastSeen: {
         type: String,
@@ -112,96 +91,100 @@ const userSchema = new mongoose.Schema(
         enum: ["everyone", "contacts", "nobody"],
         default: "everyone",
       },
-      readReceipts: { type: Boolean, default: true },
     },
 
-    // 💻 Device Info
-    devices: [
+    // 👥 Contacts & Blocks
+    contacts: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+
+    // 📱 Push Notifications
+    deviceTokens: [
       {
-        deviceId: { type: String, required: true },
-        deviceType: {
-          type: String,
-          enum: ["mobile", "web", "desktop"],
-          required: true,
-        },
-        lastActive: { type: Date, default: Date.now },
-        pushToken: { type: String, default: null },
+        token: String,
+        platform: { type: String, enum: ["ios", "android", "web"] },
+        lastUsed: { type: Date, default: Date.now },
       },
     ],
+    // 🔐 Password Reset
+    passwordResetToken: {
+      type: String,
+      select: false,
+    },
+    passwordResetExpires: {
+      type: Date,
+      select: false,
+    },
 
-    // 🧠 System Fields
-    isVerified: { type: Boolean, default: false },
-    verificationCode: { type: String, select: false },
-    verificationExpiry: { type: Date, select: false },
-    isDeleted: { type: Boolean, default: false },
+    // ✉️ Email Verification
+    emailVerified: {
+      type: Boolean,
+      default: false,
+    },
+    emailVerificationToken: {
+      type: String,
+      select: false,
+    },
+    emailVerificationExpires: {
+      type: Date,
+      select: false,
+    },
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   }
 );
 
-//
-// ⚡ Indexes (no duplicates)
-//
-userSchema.index({ "devices.deviceId": 1 });
+// ============ INDEXES ============
 userSchema.index({ email: 1 });
 userSchema.index({ username: 1 });
 userSchema.index({ status: 1, lastSeen: -1 });
 
-//
-// 🧂 Password Hash Middleware
-//
+// ============ MIDDLEWARE ============
+
+// Hash password before saving - ONLY if password is modified
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
-  this.password = await bcrypt.hash(this.password, 12);
-  this.passwordChangedAt = Date.now() - 1000;
+
+  try {
+    // Password validation happens in Joi before this point
+    const salt = await bcrypt.genSalt(12);
+    this.password = await bcrypt.hash(this.password, salt);
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Set displayName to username if not provided
+userSchema.pre("save", function (next) {
+  if (!this.displayName) {
+    this.displayName = this.username;
+  }
   next();
 });
 
-//
-// 🔑 Compare Password
-//
+// ============ METHODS ============
+
+// Compare password
 userSchema.methods.comparePassword = async function (candidatePassword) {
-  return bcrypt.compare(candidatePassword, this.password);
+  return await bcrypt.compare(candidatePassword, this.password);
 };
 
-//
-// 🕵️ Check if password changed after token issue
-//
-userSchema.methods.changedPasswordAfter = function (JWTTimestamp) {
-  if (this.passwordChangedAt) {
-    const changedTimestamp = Math.floor(
-      this.passwordChangedAt.getTime() / 1000
-    );
-    return JWTTimestamp < changedTimestamp;
-  }
-  return false;
+// Generate email verification token
+userSchema.methods.generateEmailVerificationToken = function () {
+  const verificationToken = crypto.randomBytes(32).toString("hex");
+  
+  this.emailVerificationToken = crypto
+    .createHash("sha256")
+    .update(verificationToken)
+    .digest("hex");
+    
+  this.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+  
+  return verificationToken;
 };
 
-//
-// 🔐 Generate 6-digit Verification Code (OTP)
-//
-userSchema.methods.generateVerificationCode = function () {
-  const code = crypto.randomInt(100000, 999999).toString();
-  this.verificationCode = code;
-  this.verificationExpiry = Date.now() + 10 * 60 * 1000; // expires in 10 min
-  return code;
-};
 
-//
-// 🚀 Sanitize Response
-//
-userSchema.methods.toJSON = function () {
-  const obj = this.toObject();
-  delete obj.password;
-  delete obj.verificationCode;
-  delete obj.verificationExpiry;
-  delete obj.__v;
-  return obj;
-};
-
-//
-// ✅ Export model
-//
-const User = mongoose.model("User", userSchema);
-export default User;
+export default mongoose.model("User", userSchema);

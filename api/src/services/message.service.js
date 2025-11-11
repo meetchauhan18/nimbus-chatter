@@ -213,6 +213,26 @@ export class MessageService {
     return message;
   }
 
+  async editMessage(messageId, userId, newContent) {
+    const message = await Message.findOne({ _id: messageId, senderId: userId });
+
+    if (!message) {
+      throw new NotFoundError("Message not found or unauthorized");
+    }
+
+    // Don't allow editing after 15 minutes
+    const fifteenMinutesAgo = Date.now() - 15 * 60 * 1000;
+    if (message.createdAt < fifteenMinutesAgo) {
+      throw new BadRequestError("Cannot edit messages older than 15 minutes");
+    }
+
+    message.content = newContent;
+    message.edited.isEdited = true;
+    message.edited.editedAt = new Date();
+    await message.save();
+
+    return message;
+  }
   /**
    * Delete message (soft delete)
    */

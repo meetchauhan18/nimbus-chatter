@@ -14,6 +14,7 @@ import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import authRoutes from "./routes/authRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
+import profileRoutes from "./routes/profileRoutes.js";
 
 // Socket imports
 import { initializeSocket } from "./sockets/index.js";
@@ -104,6 +105,7 @@ const authLimiter = rateLimit({
 app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/conversations", conversationRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/profile", profileRoutes);
 
 // Health check
 app.get("/health", async (req, res) => {

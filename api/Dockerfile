@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY package*.json ./
 
-RUN npm cache clean --force && npm ci
+RUN npm ci --include=dev
 
 COPY . .
 
