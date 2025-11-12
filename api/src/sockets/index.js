@@ -9,6 +9,8 @@ import { SendMessageCommand } from "./commands/SendMessageCommand.js";
 import { TypingCommand } from "./commands/typingCommand.js";
 import { pubClient, subClient } from "../config/redis.js";
 import { messageService } from "../services/message.service.js";
+import { userService } from "../services/user.service.js";
+import { groupService } from "../services/group.service.js";
 import {
   createMessageDeliveryWorker,
   getQueueStats,
@@ -553,6 +555,517 @@ export const initializeSocket = (httpServer) => {
         const { conversationId } = data;
         socket.leave(`conversation:${conversationId}`);
         console.log(`📂 User ${userId} left conversation: ${conversationId}`);
+      });
+
+      // ================== 🚫 PHASE 4: BLOCK/UNBLOCK ==================
+
+      /**
+       * 🚫 Block a user
+       */
+      socket.on("user:block", async (data) => {
+        try {
+          const { userId: blockedUserId } = data;
+
+          console.log("🚀 ~ user:block ~ blockedUserId:", blockedUserId);
+          console.log("🚀 ~ user:block ~ blockerId:", userId);
+
+          // Block the user
+          await userService.blockUser(userId, blockedUserId);
+
+          // Notify the blocked user (optional - they won't know who blocked them)
+          await connectionManager.emitToUser(blockedUserId, "user:blocked", {
+            blockerId: userId,
+          });
+
+          // Confirm to blocker
+          socket.emit("user:block:success", {
+            userId: blockedUserId,
+          });
+
+          console.log(`✅ User ${userId} blocked ${blockedUserId}`);
+        } catch (error) {
+          console.error("user:block error:", error);
+          socket.emit("error", {
+            event: "user:block",
+            message: error.message,
+          });
+        }
+      });
+
+      /**
+       * ✅ Unblock a user
+       */
+      socket.on("user:unblock", async (data) => {
+        try {
+          const { userId: blockedUserId } = data;
+
+          console.log("🚀 ~ user:unblock ~ blockedUserId:", blockedUserId);
+          console.log("🚀 ~ user:unblock ~ unblockerId:", userId);
+
+          // Unblock the user
+          await userService.unblockUser(userId, blockedUserId);
+
+          // Notify the unblocked user (optional)
+          await connectionManager.emitToUser(blockedUserId, "user:unblocked", {
+            unblockerId: userId,
+          });
+
+          // Confirm to unblocker
+          socket.emit("user:unblock:success", {
+            userId: blockedUserId,
+          });
+
+          console.log(`✅ User ${userId} unblocked ${blockedUserId}`);
+        } catch (error) {
+          console.error("user:unblock error:", error);
+          socket.emit("error", {
+            event: "user:unblock",
+            message: error.message,
+          });
+        }
+      });
+
+      // ================== 👥 PHASE 5: GROUP MANAGEMENT ==================
+
+      /**
+       * 👥 Add participants to group
+       */
+      socket.on("group:add-participants", async (data) => {
+        try {
+          const { conversationId, userIds } = data;
+
+          console.log(
+            "🚀 ~ group:add-participants ~ conversationId:",
+            conversationId
+          );
+          console.log("🚀 ~ group:add-participants ~ userIds:", userIds);
+          console.log("🚀 ~ group:add-participants ~ adminId:", userId);
+
+          // Add participants
+          const result = await groupService.addParticipants(
+            conversationId,
+            userId,
+            userIds
+          );
+
+          // Get updated conversation
+          const conversation = await Conversation.findById(conversationId)
+            .populate("participants.user", "username displayName avatar")
+            .lean();
+
+          // Notify all participants (including new ones)
+          const allParticipants = conversation.participants.map((p) =>
+            p.user._id.toString()
+          );
+
+          for (const participantId of allParticipants) {
+            await connectionManager.emitToUser(
+              participantId,
+              "group:participants-added",
+              {
+                conversationId,
+                addedUsers: result.addedUsers,
+                addedBy: userId,
+                participants: conversation.participants,
+              }
+            );
+          }
+
+          // Confirm to admin
+          socket.emit("group:add-participants:success", {
+            conversationId,
+            addedUsers: result.addedUsers,
+          });
+
+          console.log(
+            `✅ Added ${result.addedUsers.length} participants to group ${conversationId}`
+          );
+        } catch (error) {
+          console.error("group:add-participants error:", error);
+          socket.emit("error", {
+            event: "group:add-participants",
+            message: error.message,
+          });
+        }
+      });
+
+      /**
+       * 🚪 Remove participant from group
+       */
+      socket.on("group:remove-participant", async (data) => {
+        try {
+          const { conversationId, targetUserId } = data;
+
+          console.log(
+            "🚀 ~ group:remove-participant ~ conversationId:",
+            conversationId
+          );
+          console.log(
+            "🚀 ~ group:remove-participant ~ targetUserId:",
+            targetUserId
+          );
+          console.log("🚀 ~ group:remove-participant ~ adminId:", userId);
+
+          // Remove participant
+          await groupService.removeParticipant(
+            conversationId,
+            userId,
+            targetUserId
+          );
+
+          // Get updated conversation
+          const conversation = await Conversation.findById(conversationId)
+            .populate("participants.user", "username displayName avatar")
+            .lean();
+
+          // Notify removed user
+          await connectionManager.emitToUser(targetUserId, "group:removed", {
+            conversationId,
+            removedBy: userId,
+          });
+
+          // Notify remaining participants
+          const remainingParticipants = conversation.participants.map((p) =>
+            p.user._id.toString()
+          );
+
+          for (const participantId of remainingParticipants) {
+            await connectionManager.emitToUser(
+              participantId,
+              "group:participant-removed",
+              {
+                conversationId,
+                removedUserId: targetUserId,
+                removedBy: userId,
+                participants: conversation.participants,
+              }
+            );
+          }
+
+          // Confirm to admin
+          socket.emit("group:remove-participant:success", {
+            conversationId,
+            removedUserId: targetUserId,
+          });
+
+          console.log(
+            `✅ Removed user ${targetUserId} from group ${conversationId}`
+          );
+        } catch (error) {
+          console.error("group:remove-participant error:", error);
+          socket.emit("error", {
+            event: "group:remove-participant",
+            message: error.message,
+          });
+        }
+      });
+
+      /**
+       * 🚪 Leave group
+       */
+      socket.on("group:leave", async (data) => {
+        try {
+          const { conversationId } = data;
+
+          console.log("🚀 ~ group:leave ~ conversationId:", conversationId);
+          console.log("🚀 ~ group:leave ~ userId:", userId);
+
+          // Leave group
+          await groupService.leaveGroup(conversationId, userId);
+
+          // Get updated conversation
+          const conversation = await Conversation.findById(conversationId)
+            .populate("participants.user", "username displayName avatar")
+            .lean();
+
+          // Notify remaining participants
+          const remainingParticipants = conversation.participants.map((p) =>
+            p.user._id.toString()
+          );
+
+          for (const participantId of remainingParticipants) {
+            await connectionManager.emitToUser(
+              participantId,
+              "group:participant-left",
+              {
+                conversationId,
+                leftUserId: userId,
+                participants: conversation.participants,
+              }
+            );
+          }
+
+          // Confirm to user who left
+          socket.emit("group:leave:success", {
+            conversationId,
+          });
+
+          console.log(`✅ User ${userId} left group ${conversationId}`);
+        } catch (error) {
+          console.error("group:leave error:", error);
+          socket.emit("error", {
+            event: "group:leave",
+            message: error.message,
+          });
+        }
+      });
+
+      /**
+       * 👑 Promote user to admin
+       */
+      socket.on("group:promote-admin", async (data) => {
+        try {
+          const { conversationId, targetUserId } = data;
+
+          console.log(
+            "🚀 ~ group:promote-admin ~ conversationId:",
+            conversationId
+          );
+          console.log("🚀 ~ group:promote-admin ~ targetUserId:", targetUserId);
+          console.log("🚀 ~ group:promote-admin ~ ownerId:", userId);
+
+          // Promote to admin
+          await groupService.promoteToAdmin(
+            conversationId,
+            userId,
+            targetUserId
+          );
+
+          // Get updated conversation
+          const conversation = await Conversation.findById(conversationId)
+            .populate("participants.user", "username displayName avatar")
+            .lean();
+
+          // Notify all participants
+          const allParticipants = conversation.participants.map((p) =>
+            p.user._id.toString()
+          );
+
+          for (const participantId of allParticipants) {
+            await connectionManager.emitToUser(
+              participantId,
+              "group:admin-promoted",
+              {
+                conversationId,
+                promotedUserId: targetUserId,
+                promotedBy: userId,
+                admins: conversation.admins,
+              }
+            );
+          }
+
+          // Confirm to owner
+          socket.emit("group:promote-admin:success", {
+            conversationId,
+            promotedUserId: targetUserId,
+          });
+
+          console.log(
+            `✅ User ${targetUserId} promoted to admin in group ${conversationId}`
+          );
+        } catch (error) {
+          console.error("group:promote-admin error:", error);
+          socket.emit("error", {
+            event: "group:promote-admin",
+            message: error.message,
+          });
+        }
+      });
+
+      /**
+       * 📉 Demote admin to member
+       */
+      socket.on("group:demote-admin", async (data) => {
+        try {
+          const { conversationId, targetUserId } = data;
+
+          console.log(
+            "🚀 ~ group:demote-admin ~ conversationId:",
+            conversationId
+          );
+          console.log("🚀 ~ group:demote-admin ~ targetUserId:", targetUserId);
+          console.log("🚀 ~ group:demote-admin ~ ownerId:", userId);
+
+          // Demote from admin
+          await groupService.demoteFromAdmin(
+            conversationId,
+            userId,
+            targetUserId
+          );
+
+          // Get updated conversation
+          const conversation = await Conversation.findById(conversationId)
+            .populate("participants.user", "username displayName avatar")
+            .lean();
+
+          // Notify all participants
+          const allParticipants = conversation.participants.map((p) =>
+            p.user._id.toString()
+          );
+
+          for (const participantId of allParticipants) {
+            await connectionManager.emitToUser(
+              participantId,
+              "group:admin-demoted",
+              {
+                conversationId,
+                demotedUserId: targetUserId,
+                demotedBy: userId,
+                admins: conversation.admins,
+              }
+            );
+          }
+
+          // Confirm to owner
+          socket.emit("group:demote-admin:success", {
+            conversationId,
+            demotedUserId: targetUserId,
+          });
+
+          console.log(
+            `✅ User ${targetUserId} demoted from admin in group ${conversationId}`
+          );
+        } catch (error) {
+          console.error("group:demote-admin error:", error);
+          socket.emit("error", {
+            event: "group:demote-admin",
+            message: error.message,
+          });
+        }
+      });
+
+      /**
+       * ✏️ Update group info (name, description, avatar)
+       */
+      socket.on("group:update-info", async (data) => {
+        try {
+          const { conversationId, name, description, avatar } = data;
+
+          console.log(
+            "🚀 ~ group:update-info ~ conversationId:",
+            conversationId
+          );
+          console.log("🚀 ~ group:update-info ~ updates:", {
+            name,
+            description,
+            avatar,
+          });
+
+          // Update group info
+          const result = await groupService.updateGroupInfo(
+            conversationId,
+            userId,
+            {
+              name,
+              description,
+              avatar,
+            }
+          );
+
+          // Get updated conversation
+          const conversation = await Conversation.findById(conversationId)
+            .populate("participants.user", "username displayName avatar")
+            .lean();
+
+          // Notify all participants
+          const allParticipants = conversation.participants.map((p) =>
+            p.user._id.toString()
+          );
+
+          for (const participantId of allParticipants) {
+            await connectionManager.emitToUser(
+              participantId,
+              "group:info-updated",
+              {
+                conversationId,
+                group: conversation.group,
+                updatedBy: userId,
+              }
+            );
+          }
+
+          // Confirm to admin
+          socket.emit("group:update-info:success", {
+            conversationId,
+            group: result.group,
+          });
+
+          console.log(`✅ Group info updated for ${conversationId}`);
+        } catch (error) {
+          console.error("group:update-info error:", error);
+          socket.emit("error", {
+            event: "group:update-info",
+            message: error.message,
+          });
+        }
+      });
+
+      /**
+       * 👑 Transfer ownership
+       */
+      socket.on("group:transfer-ownership", async (data) => {
+        try {
+          const { conversationId, newOwnerId } = data;
+
+          console.log(
+            "🚀 ~ group:transfer-ownership ~ conversationId:",
+            conversationId
+          );
+          console.log(
+            "🚀 ~ group:transfer-ownership ~ newOwnerId:",
+            newOwnerId
+          );
+          console.log(
+            "🚀 ~ group:transfer-ownership ~ currentOwnerId:",
+            userId
+          );
+
+          // Transfer ownership
+          await groupService.transferOwnership(
+            conversationId,
+            userId,
+            newOwnerId
+          );
+
+          // Get updated conversation
+          const conversation = await Conversation.findById(conversationId)
+            .populate("participants.user", "username displayName avatar")
+            .lean();
+
+          // Notify all participants
+          const allParticipants = conversation.participants.map((p) =>
+            p.user._id.toString()
+          );
+
+          for (const participantId of allParticipants) {
+            await connectionManager.emitToUser(
+              participantId,
+              "group:ownership-transferred",
+              {
+                conversationId,
+                newOwnerId,
+                previousOwnerId: userId,
+                admins: conversation.admins,
+              }
+            );
+          }
+
+          // Confirm to previous owner
+          socket.emit("group:transfer-ownership:success", {
+            conversationId,
+            newOwnerId,
+          });
+
+          console.log(
+            `✅ Ownership transferred to ${newOwnerId} in group ${conversationId}`
+          );
+        } catch (error) {
+          console.error("group:transfer-ownership error:", error);
+          socket.emit("error", {
+            event: "group:transfer-ownership",
+            message: error.message,
+          });
+        }
       });
 
       // ================== PRESENCE EVENTS ==================

@@ -178,3 +178,40 @@ export const markConversationAsRead = asyncHandler(async (req, res) => {
 
   res.json(successResponse(result, "Conversation messages marked as read"));
 });
+
+/**
+ * Get read receipts for a message
+ */
+export const getReadReceipts = asyncHandler(async (req, res) => {
+  const { messageId } = req.params;
+  
+  const message = await Message.findById(messageId)
+    .populate("seenBy.userId", "username displayName avatar")
+    .populate("deliveredTo.userId", "username displayName avatar")
+    .select("deliveredTo seenBy status");
+
+  if (!message) {
+    throw new NotFoundError("Message not found");
+  }
+
+  res.json(successResponse({
+    messageId: message._id,
+    deliveredTo: message.deliveredTo,
+    seenBy: message.seenBy,
+    status: message.status,
+  }, "Read receipts retrieved"));
+});
+
+/**
+ * Get total unread count
+ */
+export const getTotalUnreadCount = asyncHandler(async (req, res) => {
+  const userId = req.user.userId;
+  
+  // Use your existing RedisService
+  const counts = await RedisService.getUnreadCounts(userId);
+  const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+
+  res.json(successResponse({ total, byConversation: counts }, "Unread count retrieved"));
+});
+

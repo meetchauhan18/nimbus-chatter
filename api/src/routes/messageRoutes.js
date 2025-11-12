@@ -53,4 +53,10 @@ router.post(
   messageController.markConversationAsRead
 );
 
+// Get read receipts for message
+router.get("/:messageId/receipts", messageController.getReadReceipts);
+
+// Get total unread count
+router.get("/unread/total", messageController.getTotalUnreadCount);
+
 export default router;

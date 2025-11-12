@@ -95,7 +95,18 @@ const userSchema = new mongoose.Schema(
 
     // 👥 Contacts & Blocks
     contacts: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-    blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    blockedUsers: [
+      {
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
+        blockedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
 
     // 📱 Push Notifications
     deviceTokens: [
@@ -175,16 +186,59 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
 // Generate password reset token
 userSchema.methods.generatePasswordResetToken = function () {
   const resetToken = crypto.randomBytes(32).toString("hex");
-  
+
   this.passwordResetToken = crypto
     .createHash("sha256")
     .update(resetToken)
     .digest("hex");
-    
+
   this.passwordResetExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
-  
+
   return resetToken;
 };
 
+// ============ BLOCK/UNBLOCK METHODS ============
+
+/**
+ * Check if user has blocked another user
+ */
+userSchema.methods.hasBlocked = function (userId) {
+  return this.blockedUsers.some(
+    (blocked) => blocked.user.toString() === userId.toString()
+  );
+};
+
+/**
+ * Check if user is blocked by another user (static method)
+ */
+userSchema.statics.isBlockedBy = async function (blockerId, blockedId) {
+  const blocker = await this.findById(blockerId).select("blockedUsers");
+  if (!blocker) return false;
+
+  return blocker.blockedUsers.some(
+    (blocked) => blocked.user.toString() === blockedId.toString()
+  );
+};
+
+/**
+ * Block a user
+ */
+userSchema.methods.blockUser = function (userId) {
+  if (!this.hasBlocked(userId)) {
+    this.blockedUsers.push({
+      user: userId,
+      blockedAt: new Date(),
+    });
+  }
+};
+
+/**
+ * Unblock a user
+ */
+userSchema.methods.unblockUser = function (userId) {
+  this.blockedUsers = this.blockedUsers.filter(
+    (blocked) => blocked.user.toString() !== userId.toString()
+  );
+};
 
 export default mongoose.model("User", userSchema);
