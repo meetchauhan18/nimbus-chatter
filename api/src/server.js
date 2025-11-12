@@ -16,6 +16,7 @@ import conversationRoutes from "./routes/conversationRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import profileRoutes from "./routes/profileRoutes.js";
 import messageRoutes from "./routes/messageRoutes.js";
+import mediaRoutes from "./routes/mediaRoutes.js";
 
 // Socket imports
 import { initializeSocket } from "./sockets/index.js";
@@ -108,6 +109,7 @@ app.use("/api/conversations", conversationRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/messages", messageRoutes);
+app.use("/api/media", mediaRoutes);
 
 // Health check
 app.get("/health", async (req, res) => {
