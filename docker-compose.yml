@@ -84,27 +84,6 @@ services:
       echo '🚀 Starting dev server...' &&
       npm run dev"
 
-      
-
-  worker:
-    build:
-      context: ./worker
-      dockerfile: Dockerfile
-    container_name: chat-worker
-    restart: unless-stopped
-    environment:
-      NODE_ENV: development
-      REDIS_URL: redis://redis:6379
-      MONGODB_URI: ${MONGODB_URI}
-    volumes:
-      - ./worker:/app
-      - worker_node_modules:/app/node_modules
-    networks:
-      - chat-network
-    depends_on:
-      redis:
-        condition: service_healthy
-
   client:
     build:
       context: ./client
