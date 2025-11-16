@@ -117,6 +117,17 @@ export default {
       },
       { singleton: true, lazy: false, dependencies: ["core.redis"] }
     );
+
+    registry.registerService(
+      "conversation.service",
+      async () => {
+        const { ConversationServiceStub } = await import(
+          "../../services/conversation.service.stub.js"
+        );
+        return new ConversationServiceStub();
+      },
+      { singleton: true, lazy: false }
+    );
   },
 
   init: async (registry) => {

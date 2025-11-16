@@ -113,6 +113,19 @@ async function startServer() {
       logger.warn("⚠️  Mounted: /api/auth (legacy fallback)");
     }
 
+    // In the route mounting section (around line 90):
+    // Mount message routes
+    if (registry.has("message.routes")) {
+      const messageRoutes = await registry.resolveAsync("message.routes");
+      app.use("/api/messages", messageRoutes);
+      logger.info("✅ Mounted message routes");
+    } else {
+      // Fallback to legacy routes
+      const legacyMessageRoutes = await import("./routes/messageRoutes.js");
+      app.use("/api/messages", legacyMessageRoutes.default);
+      logger.warn("⚠️ Using legacy message routes");
+    }
+
     // Conversation Routes (legacy for now)
     app.use("/api/conversations", conversationRoutes);
     logger.info("📦 Mounted: /api/conversations (legacy)");
@@ -124,10 +137,6 @@ async function startServer() {
     // Profile Routes (legacy for now)
     app.use("/api/profile", profileRoutes);
     logger.info("📦 Mounted: /api/profile (legacy)");
-
-    // Message Routes (legacy for now)
-    app.use("/api/messages", messageRoutes);
-    logger.info("📦 Mounted: /api/messages (legacy)");
 
     // Media Routes (legacy for now)
     app.use("/api/media", mediaRoutes);
