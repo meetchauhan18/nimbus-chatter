@@ -15,6 +15,7 @@ import authModule from "./modules/auth/index.js";
 import messageModule from "./modules/message/index.js";
 import conversationModule from "./modules/conversation/index.js";
 import profileModule from "./modules/profile/index.js";
+import userModule from "./modules/user/index.js";
 
 // Middleware imports (KEEP - not yet migrated)
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
@@ -39,6 +40,7 @@ async function startServer() {
     await registry.registerModule(messageModule);
     await registry.registerModule(conversationModule);
     await registry.registerModule(profileModule);
+    await registry.registerModule(userModule);
 
     console.log("✅ Phase 3 complete: Registry initialized with modules\n");
 
@@ -165,9 +167,17 @@ async function startServer() {
       logger.warn("⚠️ Using legacy profile routes");
     }
 
-    // User Routes (legacy for now)
-    app.use("/api/users", userRoutes);
-    logger.info("📦 Mounted: /api/users (legacy)");
+    // Mount user routes
+    if (registry.has("user.routes")) {
+      const userRoutes = await registry.resolveAsync("user.routes");
+      app.use("/api/users", userRoutes);
+      logger.info("✅ Mounted user routes");
+    } else {
+      // Fallback to legacy routes
+      const legacyUserRoutes = await import("./routes/userRoutes.js");
+      app.use("/api/users", legacyUserRoutes.default);
+      logger.warn("⚠️ Using legacy user routes");
+    }
 
     // Media Routes (legacy for now)
     app.use("/api/media", mediaRoutes);
