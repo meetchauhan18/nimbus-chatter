@@ -1,32 +1,28 @@
 import { ModuleRegistry } from "../core/registry/ModuleRegistry.js";
 import { ModuleLoader } from "../core/loader/ModuleLoader.js";
-import loadEnvironment from "./loadEnv.js";
 import coreModule from "../core/modules/core.module.js";
 
 /**
  * Initialize registry and load all modules
  */
 export const initRegistry = async () => {
-  // STEP 1: Load environment FIRST
-  loadEnvironment();
-
-  // STEP 2: Create registry
+  // Create registry
   const registry = new ModuleRegistry();
 
-  // STEP 3: Register core module
+  // Register core module
   registry.registerModule(coreModule);
   await registry.initModule("core");
 
-  // STEP 4: Update logger
-  const logger = await registry.resolve("core.logger");
+  // Update logger
+  const logger = await registry.resolveAsync("core.logger");
   registry.setLogger(logger);
 
-  // STEP 5: Load business modules
+  // Load business modules (skip if directory doesn't exist)
   const loader = new ModuleLoader(registry);
-  await loader.loadAllModules();
+  const loadedModules = await loader.loadAllModules();
 
   logger.info(
-    `📦 Registry initialized with ${registry.listServices().length} services`
+    `📦 Registry initialized: ${registry.listServices().length} services, ${loadedModules.length} modules`
   );
 
   return registry;

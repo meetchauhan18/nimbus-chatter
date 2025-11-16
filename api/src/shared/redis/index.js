@@ -1,15 +1,16 @@
-import Redis from 'ioredis';
-import { config } from '../config/index.js';
+import Redis from "ioredis";
 
 class RedisManager {
-  constructor() {
+  constructor({ config, logger }) {
+    this.config = config;
+    this.logger = logger;
     this.cacheClient = null;
     this.pubClient = null;
     this.subClient = null;
   }
 
   async connect() {
-    const { host, port, password } = config.redis;
+    const { host, port, password } = this.config;
 
     const baseConfig = {
       host,
@@ -20,14 +21,18 @@ class RedisManager {
       lazyConnect: false,
       retryStrategy: (times) => Math.min(times * 50, 2000),
       reconnectOnError: (err) => {
-        console.error('Redis reconnecting due to error:', err.message);
+        this.logger?.error?.("Redis reconnecting due to error:", err.message);
         return true;
       },
       family: 4,
     };
 
     try {
-      this.cacheClient = new Redis({ ...baseConfig, keyPrefix: 'cache:', db: 0 });
+      this.cacheClient = new Redis({
+        ...baseConfig,
+        keyPrefix: "cache:",
+        db: 0,
+      });
       this.pubClient = new Redis({ ...baseConfig, db: 1 });
       this.subClient = this.pubClient.duplicate();
 
@@ -39,29 +44,31 @@ class RedisManager {
 
       this._setupEventListeners();
 
-      console.log('✅ Redis Connected (cache + pub/sub)');
-      return {
-        cacheClient: this.cacheClient,
-        pubClient: this.pubClient,
-        subClient: this.subClient,
-      };
+      this.logger?.info?.("✅ Redis Connected (cache + pub/sub)");
+
+      // Return this (instance) with clients as properties
+      return this;
     } catch (error) {
-      console.error('❌ Redis Connection Error:', error.message);
+      this.logger?.error?.("❌ Redis Connection Error:", error.message);
       throw error;
     }
   }
 
   _setupEventListeners() {
     const clients = [
-      { name: 'cache', client: this.cacheClient },
-      { name: 'pub', client: this.pubClient },
-      { name: 'sub', client: this.subClient },
+      { name: "cache", client: this.cacheClient },
+      { name: "pub", client: this.pubClient },
+      { name: "sub", client: this.subClient },
     ];
 
     clients.forEach(({ name, client }) => {
-      client.on('error', (err) => console.error(`Redis ${name} error:`, err.message));
-      client.on('reconnecting', () => console.warn(`⚠️  Redis ${name} reconnecting...`));
-      client.on('ready', () => console.log(`✅ Redis ${name} ready`));
+      client.on("error", (err) =>
+        this.logger?.error?.(`Redis ${name} error:`, err.message)
+      );
+      client.on("reconnecting", () =>
+        this.logger?.warn?.(`⚠️  Redis ${name} reconnecting...`)
+      );
+      client.on("ready", () => this.logger?.info?.(`✅ Redis ${name} ready`));
     });
   }
 
@@ -71,7 +78,7 @@ class RedisManager {
       this.pubClient?.quit(),
       this.subClient?.quit(),
     ]);
-    console.log('Redis disconnected');
+    this.logger?.info?.("Redis disconnected");
   }
 
   async checkHealth() {
@@ -83,13 +90,13 @@ class RedisManager {
       ]);
 
       return {
-        status: 'connected',
-        cache: cachePing === 'PONG',
-        pub: pubPing === 'PONG',
-        sub: subPing === 'PONG',
+        status: "connected",
+        cache: cachePing === "PONG",
+        pub: pubPing === "PONG",
+        sub: subPing === "PONG",
       };
     } catch (error) {
-      return { status: 'error', message: error.message };
+      return { status: "error", message: error.message };
     }
   }
 

@@ -1,6 +1,6 @@
 /**
  * Core Infrastructure Module
- * Wraps existing Database, RedisManager, EventBus, Logger
+ * Wraps existing Database, RedisManager, EventBus, Logger, Cache
  */
 export default {
   name: "core",
@@ -11,7 +11,7 @@ export default {
   },
 
   register: (registry) => {
-    // Register config (async import)
+    // Config (async import)
     registry.registerService(
       "core.config",
       async () => {
@@ -21,7 +21,7 @@ export default {
       { singleton: true, lazy: false }
     );
 
-    // Register logger (depends on config)
+    // Logger (depends on config)
     registry.registerService(
       "core.logger",
       async (reg) => {
@@ -32,7 +32,7 @@ export default {
       { singleton: true, lazy: false, dependencies: ["core.config"] }
     );
 
-    // Register database (depends on config, logger)
+    // Database (depends on logger)
     registry.registerService(
       "core.database",
       async (reg) => {
@@ -47,14 +47,22 @@ export default {
       }
     );
 
-    // Register Redis (depends on config, logger)
+    // Redis Manager (depends on config, logger)
     registry.registerService(
       "core.redis",
       async (reg) => {
         const config = await reg.resolveAsync("core.config");
         const logger = await reg.resolveAsync("core.logger");
         const RedisManager = await import("../../shared/redis/index.js");
-        return new RedisManager.default(config.redis, logger);
+
+        const manager = new RedisManager.default({
+          config: config.redis,
+          logger,
+        });
+
+        await manager.connect();
+
+        return manager;
       },
       {
         singleton: true,
@@ -63,14 +71,23 @@ export default {
       }
     );
 
-    // Register EventBus (depends on redis, logger)
+    // EventBus (depends on redis, logger)
     registry.registerService(
       "core.eventBus",
       async (reg) => {
         const redis = await reg.resolveAsync("core.redis");
         const logger = await reg.resolveAsync("core.logger");
         const EventBus = await import("../../shared/events/EventBus.js");
-        return new EventBus.default(redis.pubClient, redis.subClient, logger);
+
+        if (!redis.pubClient || !redis.subClient) {
+          throw new Error("Redis clients not initialized properly");
+        }
+
+        return new EventBus.default({
+          pubClient: redis.pubClient,
+          subClient: redis.subClient,
+          logger: logger,
+        });
       },
       {
         singleton: true,
@@ -78,21 +95,46 @@ export default {
         dependencies: ["core.redis", "core.logger"],
       }
     );
+
+    // Cache Service (depends on redis)
+    registry.registerService(
+      "core.cache",
+      async (reg) => {
+        const redis = await reg.resolveAsync("core.redis");
+        const CacheService = await import("../../services/cache.service.js");
+        return new CacheService.default(redis.cacheClient);
+      },
+      { singleton: true, lazy: false, dependencies: ["core.redis"] }
+    );
+
+    // Redis Service (depends on redis)
+    registry.registerService(
+      "core.redisService",
+      async (reg) => {
+        const redis = await reg.resolveAsync("core.redis");
+        const RedisService = await import("../../services/redisServices.js");
+        return new RedisService.default(redis.cacheClient);
+      },
+      { singleton: true, lazy: false, dependencies: ["core.redis"] }
+    );
   },
 
   init: async (registry) => {
     const logger = await registry.resolveAsync("core.logger");
     const database = await registry.resolveAsync("core.database");
-    const redis = await registry.resolveAsync("core.redis");
+    const eventBus = await registry.resolveAsync("core.eventBus");
 
     logger.info("🚀 Initializing core infrastructure...");
 
     // Connect database
     await database.connect();
 
-    // Connect Redis
-    if (redis.connect && typeof redis.connect === "function") {
-      await redis.connect();
+    // Redis already connected during service creation
+    logger.info("✅ Redis clients ready");
+
+    // Start EventBus listening
+    if (eventBus.startListening) {
+      eventBus.startListening();
     }
 
     logger.info("✅ Core infrastructure initialized");
@@ -101,11 +143,21 @@ export default {
   destroy: async (registry) => {
     const logger = await registry.resolveAsync("core.logger");
     const database = await registry.resolveAsync("core.database");
+    const redis = await registry.resolveAsync("core.redis");
+    const eventBus = await registry.resolveAsync("core.eventBus");
 
     logger.info("🛑 Shutting down core infrastructure...");
 
+    if (eventBus.stopListening) {
+      eventBus.stopListening();
+    }
+
     if (database.disconnect) {
       await database.disconnect();
+    }
+
+    if (redis.disconnect) {
+      await redis.disconnect();
     }
   },
 };

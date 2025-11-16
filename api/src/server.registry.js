@@ -1,0 +1,156 @@
+import express from 'express';
+import http from 'http';
+import cors from 'cors';
+import helmet from 'helmet';
+import morgan from 'morgan';
+import compression from 'compression';
+import rateLimit from 'express-rate-limit';
+
+// Registry bootstrap
+import { initRegistry } from './bootstrap/initRegistry.js';
+import { registryContext } from './core/middleware/registryContext.js';
+
+// Middleware imports (KEEP - not yet migrated)
+import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
+import { hstsMiddleware, httpsRedirect } from './middleware/httpRedirect.js';
+
+// Route imports (KEEP - not yet migrated)
+import authRoutes from './routes/authRoutes.js';
+import conversationRoutes from './routes/conversationRoutes.js';
+import userRoutes from './routes/userRoutes.js';
+import profileRoutes from './routes/profileRoutes.js';
+import messageRoutes from './routes/messageRoutes.js';
+import mediaRoutes from './routes/mediaRoutes.js';
+
+// Socket imports (KEEP - not yet migrated)
+import { initializeSocket } from './sockets/index.js';
+
+async function startServer() {
+  try {
+    // ===== PHASE 2: Registry-First Bootstrap =====
+    console.log('🔧 Phase 2: Initializing registry...');
+    const registry = await initRegistry();
+
+    // Resolve core services
+    const logger = await registry.resolveAsync('core.logger');
+    const config = await registry.resolveAsync('core.config');
+    const database = await registry.resolveAsync('core.database');
+    const redis = await registry.resolveAsync('core.redis');
+    const eventBus = await registry.resolveAsync('core.eventBus');
+
+    // Create Express app
+    const app = express();
+    const server = http.createServer(app);
+
+    // ===== Inject Registry into Request Context =====
+    app.use(registryContext(registry));
+
+    // ===== Security middleware =====
+    if (config.env === 'production') {
+      app.use(httpsRedirect);
+      app.use(hstsMiddleware);
+    }
+
+    app.use(helmet());
+    app.use(cors({ origin: config.client.url, credentials: true }));
+
+    // ===== General middleware =====
+    app.use(compression());
+    app.use(morgan('dev'));
+    app.use(express.json({ limit: '10mb' }));
+    app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+    // ===== Rate limiting =====
+    const limiter = rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 100,
+      message: 'Too many requests from this IP',
+    });
+    app.use('/api/', limiter);
+
+    // ===== Health check (Registry-aware) =====
+    app.get('/health', async (req, res) => {
+      try {
+        const dbHealth = await database.checkHealth();
+        const redisHealth = await redis.checkHealth();
+        const isHealthy = dbHealth.isConnected && redisHealth.status === 'connected';
+
+        res.status(isHealthy ? 200 : 503).json({
+          status: isHealthy ? 'healthy' : 'unhealthy',
+          timestamp: new Date().toISOString(),
+          services: {
+            database: dbHealth,
+            redis: redisHealth,
+            registry: {
+              servicesRegistered: registry.listServices().length,
+            },
+          },
+        });
+      } catch (error) {
+        logger.error('Health check failed:', error);
+        res.status(503).json({
+          status: 'unhealthy',
+          error: error.message,
+        });
+      }
+    });
+
+    // ===== Routes (BACKWARD COMPATIBLE - still use old imports) =====
+    app.use('/api/auth', authRoutes);
+    app.use('/api/conversations', conversationRoutes);
+    app.use('/api/users', userRoutes);
+    app.use('/api/profile', profileRoutes);
+    app.use('/api/messages', messageRoutes);
+    app.use('/api/media', mediaRoutes);
+
+    // ===== Error handling =====
+    app.use(notFoundHandler);
+    app.use(errorHandler);
+
+    // ===== Initialize Socket.IO (still passes clients directly) =====
+    const io = initializeSocket(
+      server,
+      redis.pubClient,
+      redis.subClient,
+      redis.cacheClient
+    );
+
+    // Store io in app.locals for backward compatibility
+    app.locals.io = io;
+
+    // ===== Start server =====
+    server.listen(config.port, () => {
+      logger.info(`🚀 Server running on port ${config.port}`);
+      logger.info(`📡 Environment: ${config.env}`);
+      logger.info(`🌐 Client URL: ${config.client.url}`);
+      logger.info(`📦 Registry: ${registry.listServices().length} services`);
+    });
+
+    // ===== Graceful shutdown =====
+    const shutdown = async () => {
+      logger.info('Shutting down gracefully...');
+      
+      // Use registry destroy hooks
+      if (registry._modules.has('core')) {
+        const coreModule = registry._modules.get('core');
+        if (coreModule.definition.destroy) {
+          await coreModule.definition.destroy(registry);
+        }
+      }
+
+      server.close(() => {
+        logger.info('Server closed');
+        process.exit(0);
+      });
+    };
+
+    process.on('SIGTERM', shutdown);
+    process.on('SIGINT', shutdown);
+
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+startServer();

@@ -1,6 +1,7 @@
-import { readdir } from 'fs/promises';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { readdir, access } from "fs/promises";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+import { constants } from "fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -10,7 +11,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export class ModuleLoader {
   constructor(registry, modulesPath = null) {
     this.registry = registry;
-    this.modulesPath = modulesPath || join(__dirname, '../../modules');
+    this.modulesPath = modulesPath || join(__dirname, "../../modules");
     this.loadedModules = new Set();
   }
 
@@ -19,10 +20,29 @@ export class ModuleLoader {
    */
   async loadAllModules() {
     try {
-      const entries = await readdir(this.modulesPath, { withFileTypes: true });
-      const moduleDirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+      // Check if modules directory exists
+      try {
+        await access(this.modulesPath, constants.F_OK);
+      } catch {
+        console.log(
+          `ℹ️  No modules directory found at ${this.modulesPath} - skipping module loading`
+        );
+        return [];
+      }
 
-      console.log(`🔍 Discovered ${moduleDirs.length} modules: ${moduleDirs.join(', ')}`);
+      const entries = await readdir(this.modulesPath, { withFileTypes: true });
+      const moduleDirs = entries
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name);
+
+      if (moduleDirs.length === 0) {
+        console.log("ℹ️  No modules found in modules directory");
+        return [];
+      }
+
+      console.log(
+        `🔍 Discovered ${moduleDirs.length} modules: ${moduleDirs.join(", ")}`
+      );
 
       // Load modules
       const modules = [];
@@ -43,7 +63,7 @@ export class ModuleLoader {
       // Initialize all
       await this.registry.initAllModules();
 
-      console.log(`✅ Loaded ${modules.length} modules successfully`);
+      console.log(`✅ Loaded ${modules.length} business modules`);
       return modules;
     } catch (error) {
       throw new Error(`Module loading failed: ${error.message}`);
@@ -55,7 +75,7 @@ export class ModuleLoader {
    */
   async loadModule(name) {
     try {
-      const modulePath = join(this.modulesPath, name, 'index.js');
+      const modulePath = join(this.modulesPath, name, "index.js");
       const module = await import(modulePath);
       const definition = module.default;
 
@@ -75,22 +95,28 @@ export class ModuleLoader {
    * Validate module definition
    */
   _validateModule(definition, expectedName) {
-    const required = ['name', 'register'];
+    const required = ["name", "register"];
     const missing = required.filter((field) => !definition[field]);
 
     if (missing.length > 0) {
-      throw new Error(`Module '${expectedName}' missing required fields: ${missing.join(', ')}`);
+      throw new Error(
+        `Module '${expectedName}' missing required fields: ${missing.join(", ")}`
+      );
     }
 
     if (definition.name !== expectedName) {
-      throw new Error(`Module name mismatch: expected '${expectedName}', got '${definition.name}'`);
+      throw new Error(
+        `Module name mismatch: expected '${expectedName}', got '${definition.name}'`
+      );
     }
 
-    if (typeof definition.register !== 'function') {
-      throw new Error(`Module '${definition.name}' register must be a function`);
+    if (typeof definition.register !== "function") {
+      throw new Error(
+        `Module '${definition.name}' register must be a function`
+      );
     }
 
-    if (definition.init && typeof definition.init !== 'function') {
+    if (definition.init && typeof definition.init !== "function") {
       throw new Error(`Module '${definition.name}' init must be a function`);
     }
   }
@@ -114,7 +140,7 @@ export class ModuleLoader {
       const deps = module.dependencies || [];
       for (const depName of deps) {
         // Skip core dependencies
-        if (depName.startsWith('core.')) continue;
+        if (depName.startsWith("core.")) continue;
 
         const depModule = modules.find((m) => m.name === depName);
         if (depModule) {

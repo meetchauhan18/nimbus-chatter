@@ -5,7 +5,9 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
+    "start:registry": "node src/server.registry.js",
     "dev": "nodemon src/server.js",
+    "dev:registry": "nodemon src/server.registry.js",
     "lint": "eslint .",
     "migrate:indexes": "node src/migrations/001_add_indexes.js",
     "migrate:indexes:remove": "node src/migrations/001_add_indexes.js remove"
