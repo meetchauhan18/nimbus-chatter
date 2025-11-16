@@ -14,6 +14,7 @@ import { registryContext } from "./core/middleware/registryContext.js";
 import authModule from "./modules/auth/index.js";
 import messageModule from "./modules/message/index.js";
 import conversationModule from "./modules/conversation/index.js";
+import profileModule from "./modules/profile/index.js";
 
 // Middleware imports (KEEP - not yet migrated)
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
@@ -37,6 +38,8 @@ async function startServer() {
     await registry.registerModule(authModule);
     await registry.registerModule(messageModule);
     await registry.registerModule(conversationModule);
+    await registry.registerModule(profileModule);
+
     console.log("✅ Phase 3 complete: Registry initialized with modules\n");
 
     // Resolve core services
@@ -109,9 +112,9 @@ async function startServer() {
       }
     });
 
-    // ===== DYNAMIC ROUTE MOUNTING (Module-first, fallback to legacy) ===== 
+    // ===== DYNAMIC ROUTE MOUNTING (Module-first, fallback to legacy) =====
 
-    // Mount auth Routes 
+    // Mount auth Routes
     if (registry.has("auth.routes")) {
       const authRoutes = await registry.resolveAsync("auth.routes");
       app.use("/api/auth", authRoutes);
@@ -150,13 +153,21 @@ async function startServer() {
       logger.warn("⚠️ Using legacy conversation routes");
     }
 
+    // Mount profile routes
+    if (registry.has("profile.routes")) {
+      const profileRoutes = await registry.resolveAsync("profile.routes");
+      app.use("/api/profile", profileRoutes);
+      logger.info("✅ Mounted profile routes");
+    } else {
+      // Fallback to legacy routes
+      const legacyProfileRoutes = await import("./routes/profileRoutes.js");
+      app.use("/api/profile", legacyProfileRoutes.default);
+      logger.warn("⚠️ Using legacy profile routes");
+    }
+
     // User Routes (legacy for now)
     app.use("/api/users", userRoutes);
     logger.info("📦 Mounted: /api/users (legacy)");
-
-    // Profile Routes (legacy for now)
-    app.use("/api/profile", profileRoutes);
-    logger.info("📦 Mounted: /api/profile (legacy)");
 
     // Media Routes (legacy for now)
     app.use("/api/media", mediaRoutes);
