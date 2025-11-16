@@ -44,9 +44,25 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_ACCESS_EXPIRY: ${JWT_ACCESS_EXPIRY:-1d}
+      JWT_REFRESH_EXPIRY: ${JWT_REFRESH_EXPIRY:-7d}
+      CLIENT_URL: http://localhost:5173
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
+      EMAIL_HOST: ${EMAIL_HOST}
+      EMAIL_PORT: ${EMAIL_PORT}
+      EMAIL_USER: ${EMAIL_USER}
+      EMAIL_PASSWORD: ${EMAIL_PASSWORD}
+      EMAIL_FROM: ${EMAIL_FROM}
+      FRONTEND_URL: http://localhost:5173
+      MAX_FILE_SIZE_MB: 10
+      MAX_IMAGE_SIZE_MB: 5
+      MAX_VIDEO_SIZE_MB: 50
+      MAX_AUDIO_SIZE_MB: 10
     volumes:
       - ./api:/app
-      - api_node_modules:/app/node_modules
+      - /app/node_modules
     networks:
       - chat-network
     depends_on:
@@ -57,6 +73,38 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    command: >
+      sh -c "if [ ! -d node_modules ] || [ package-lock.json -nt node_modules ];
+      then
+        echo '🧹 Cleaning npm cache...' &&
+        npm cache clean --force &&
+        echo '📦 Installing dependencies...' &&
+        npm ci --legacy-peer-deps;
+      fi &&
+      echo '🚀 Starting dev server...' &&
+      npm run dev"
+
+      
+
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: chat-worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      REDIS_URL: redis://redis:6379
+      MONGODB_URI: ${MONGODB_URI}
+    volumes:
+      - ./worker:/app
+      - worker_node_modules:/app/node_modules
+    networks:
+      - chat-network
+    depends_on:
+      redis:
+        condition: service_healthy
+
   client:
     build:
       context: ./client

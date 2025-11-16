@@ -1,49 +1,56 @@
 import Joi from "joi";
 
-/**
- * Validation Schemas for Authentication Endpoints
- * Uses Joi for robust input validation
- */
-
 export const registerSchema = Joi.object({
-  phone: Joi.string()
-    .pattern(/^\+[1-9]\d{1,14}$/)
+  email: Joi.string()
+    .email({ tlds: { allow: false } })
     .required()
+    .lowercase()
+    .trim()
+    .max(255)
     .messages({
-      "string.pattern.base":
-        "Phone must be in E.164 format (e.g., +1234567890)",
-      "any.required": "Phone number is required",
+      "string.email": "Email must be a valid email address",
+      "any.required": "Email is required",
     }),
-
-  displayName: Joi.string().min(2).max(50).trim().required().messages({
-    "string.min": "Display name must be at least 2 characters",
-    "string.max": "Display name must not exceed 50 characters",
-    "any.required": "Display name is required",
-  }),
-
-  password: Joi.string().min(8).max(128).required().messages({
-    "string.min": "Password must be at least 8 characters",
-    "any.required": "Password is required",
-  }),
 
   username: Joi.string()
     .pattern(/^[a-zA-Z0-9._-]+$/)
     .min(3)
     .max(30)
-    .optional()
+    .required()
+    .trim()
     .messages({
       "string.pattern.base":
         "Username can only contain letters, numbers, dots, underscores, and hyphens",
+      "string.min": "Username must be at least 3 characters",
+      "string.max": "Username must not exceed 30 characters",
+      "any.required": "Username is required",
+    }),
+
+  password: Joi.string()
+    .min(8)
+    .max(128)
+    .required()
+    .pattern(
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?^()_+=\-\[\]{};:'",.<>\/\\|`~])/
+    )
+    .messages({
+      "string.min": "Password must be at least 8 characters",
+      "string.max": "Password must not exceed 128 characters",
+      "string.pattern.base":
+        "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
+      "any.required": "Password is required",
     }),
 });
 
 export const loginSchema = Joi.object({
-  phone: Joi.string()
-    .pattern(/^\+[1-9]\d{1,14}$/)
+  email: Joi.string()
+    .email({ tlds: { allow: false } })
     .required()
+    .lowercase()
+    .trim()
     .messages({
-      "string.pattern.base": "Phone must be in E.164 format",
-      "any.required": "Phone number is required",
+      "string.email": "Email must be a valid email address",
+      "any.required": "Email is required",
     }),
 
   password: Joi.string().required().messages({

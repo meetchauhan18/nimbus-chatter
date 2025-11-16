@@ -1,203 +1,188 @@
 import express from "express";
+import http from "http";
 import cors from "cors";
 import helmet from "helmet";
-import compression from "compression";
 import morgan from "morgan";
+import compression from "compression";
 import rateLimit from "express-rate-limit";
-import mongoose from "mongoose";
-import http from "http";
-import { Server } from "socket.io";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
-import connectDB from "./config/database.js";
-import authRoutes from "./routes/authRoutes.js";
 import dotenv from "dotenv";
-import { cacheClient, pubClient, subClient } from "./config/redis.js";
-import { verifyAccessToken } from "./config/jwt.js";
-import Conversation from "./models/Conversation.js";
-import User from "./models/user.js";
-import { createAdapter } from "@socket.io/redis-adapter";
+
+// Middleware imports
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 
-// ✅ Get directory name for ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+// Route imports
+import authRoutes from "./routes/authRoutes.js";
+import conversationRoutes from "./routes/conversationRoutes.js";
+import userRoutes from "./routes/userRoutes.js";
+import profileRoutes from "./routes/profileRoutes.js";
+import messageRoutes from "./routes/messageRoutes.js";
+import mediaRoutes from "./routes/mediaRoutes.js";
 
-// ✅ Load .env from project root (works in Docker and local)
-dotenv.config({
-  path: join(__dirname, "../../.env"),
-});
+// Socket imports
+import { initializeSocket } from "./sockets/index.js";
+import connectDB, { checkDBHealth } from "./config/database.js";
+import { checkRedisHealth, connectRedis } from "./config/redis.js";
+import { hstsMiddleware, httpsRedirect } from "./middleware/httpRedirect.js";
+import { getQueueStats } from "./queues/messageDeliveryQueue.js";
+import { connectionManager } from "./sockets/managers/ConnectionManager.js";
+
+// Load environment variables
+dotenv.config({ path: "../.env" });
 
 const app = express();
+const httpServer = http.createServer(app);
 
-// ✅ Connect to MongoDB
-await connectDB();
-
-// ✅ Middleware stack
+// ================== MIDDLEWARE ==================
 app.use(helmet());
+const allowedOrigins = process.env.CLIENT_URL
+  ? process.env.CLIENT_URL?.split(",").map((origin) => origin.trim())
+  : ["http://localhost:5173"];
+
+// In production, CLIENT_URL must be explicitly set
+if (process.env.NODE_ENV === "production" && allowedOrigins?.length === 0) {
+  console.error("❌ SECURITY ERROR: CLIENT_URL must be set in production");
+  process.exit(1);
+}
+
+// Development fallback
+const developmentOrigin = "http://localhost:5173";
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
+    origin: (origin, callback) => {
+      // Allow requests with no origin (mobile apps, Postman, same-origin)
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      // Check if origin is allowed
+      const origins =
+        allowedOrigins?.length > 0 ? allowedOrigins : [developmentOrigin];
+
+      if (origins?.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.warn(
+          `⚠️ CORS blocked request from unauthorized origin: ${origin}`
+        );
+        callback(new Error(`Origin ${origin} not allowed by CORS policy`));
+      }
+    },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    exposedHeaders: ["Content-Range", "X-Content-Range"],
+    maxAge: 600, // Cache preflight requests for 10 minutes
   })
 );
+app.use(morgan("dev"));
 app.use(compression());
 app.use(express.json({ limit: "10mb" }));
-app.use(morgan("dev"));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+app.use(httpsRedirect);
+app.use(hstsMiddleware);
 
-// ✅ Rate limiting (protect API routes)
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 min
-  max: 100, // limit each IP
-});
-app.use("/api/", limiter);
-
-app.get("/readiness", async (req, res) => {
-  const checks = { mongodb: false, redis: false };
-
-  try {
-    // Check MongoDB connection
-    checks.mongodb = mongoose.connection.readyState === 1;
-
-    // Check Redis connectivity
-    await cacheClient.ping();
-    checks.redis = true;
-
-    if (checks.mongodb && checks.redis) {
-      return res.json({ status: "ready", checks });
-    } else {
-      return res.status(503).json({ status: "not ready", checks });
-    }
-  } catch (error) {
-    return res.status(503).json({
+// Rate limiting
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Only 5 requests per window
+  message: {
+    status: "error",
+    message:
+      "Too many authentication attempts from this IP, please try again after 15 minutes",
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true, // Count successful attempts too
+  handler: (req, res) => {
+    res.status(429).json({
       status: "error",
-      checks,
+      message: "Too many authentication attempts. Please try again later.",
+      retryAfter: Math.ceil(req.rateLimit.resetTime / 1000),
+    });
+  },
+});
+
+// ================== ROUTES ==================
+app.use("/api/auth", authLimiter, authRoutes);
+app.use("/api/conversations", conversationRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/profile", profileRoutes);
+app.use("/api/messages", messageRoutes);
+app.use("/api/media", mediaRoutes);
+
+// Health check
+app.get("/health", async (req, res) => {
+  try {
+    const [dbHealth, redisHealth, queueStats, connectionStats] =
+      await Promise.all([
+        checkDBHealth(),
+        checkRedisHealth(),
+        getQueueStats(),
+        connectionManager?.getStats(),
+      ]);
+
+    const health = {
+      status: "healthy",
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      database: dbHealth,
+      redis: redisHealth,
+      queue: queueStats,
+      connections: connectionStats,
+      memory: process.memoryUsage(),
+    };
+
+    res.json(health);
+  } catch (error) {
+    res.status(503).json({
+      status: "unhealthy",
       error: error.message,
     });
   }
 });
 
-// ✅ Routes
-app.use("/api/auth", authRoutes);
-
-// ✅ Health check (existing)
-app.get("/health", (req, res) => {
-  res.json({
-    status: "healthy",
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    environment: process.env.NODE_ENV || "development",
-  });
-});
-
-// 🆕 404 Handler (ADD THIS)
+// 404 Handler
 app.use(notFoundHandler);
 
-// 🆕 Global Error Handler (ADD THIS - MUST BE LAST)
+// Global Error Handler (must be last)
 app.use(errorHandler);
 
-// ✅ Create HTTP server
-const server = http.createServer(app);
+// ================== SOCKET.IO ==================
+const io = initializeSocket(httpServer);
 
-// ✅ Initialize Socket.IO
-const io = new Server(server, {
-  cors: {
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
-    credentials: true,
-  },
-  transports: ["websocket", "polling"],
-  pingTimeout: 60000,
-  pingInterval: 25000,
-});
+// Make io accessible to routes (if needed)
+app.set("io", io);
 
-// In Socket.IO setup
-if (pubClient && subClient) {
-  try {
-    io.adapter(createAdapter(pubClient, subClient));
-    console.log("✅ Socket.IO Redis adapter initialized");
-  } catch (error) {
-    console.warn("⚠️ Redis adapter not initialized:", error.message);
-  }
-}
-
-// ✅ Socket.IO Authentication middleware
-io.use(async (socket, next) => {
-  try {
-    const token = socket.handshake.auth?.token;
-
-    if (!token) {
-      return next(new Error("Authentication token required"));
-    }
-
-    const decoded = verifyAccessToken(token);
-    const user = await User.findById(decoded.userId).select("-password");
-
-    if (!user) {
-      return next(new Error("User not found"));
-    }
-
-    socket.userId = user._id.toString();
-    socket.user = user;
-    next();
-  } catch (error) {
-    console.error("❌ Socket Auth Error:", error.message);
-    next(new Error("Authentication failed"));
-  }
-});
-
-// ✅ Socket.IO Connection handler
-io.on("connection", async (socket) => {
-  console.log(`⚡ User connected: ${socket.userId}`);
-
-  // Join personal room
-  socket.join(`user:${socket.userId}`);
-
-  // Update user online status
-  await User.findByIdAndUpdate(socket.userId, { status: "online" });
-
-  // Join all conversation rooms
-  const conversations = await Conversation.find({
-    participants: socket.userId,
-  }).select("_id");
-
-  conversations.forEach((conv) => {
-    socket.join(`conversation:${conv._id}`);
-  });
-
-  // Broadcast that the user is online
-  socket.broadcast.emit("user:online", { userId: socket.userId });
-
-  // ✅ Handle disconnection
-  socket.on("disconnect", async () => {
-    console.log(`❌ User disconnected: ${socket.userId}`);
-
-    // Delay before marking offline (to handle quick reconnects)
-    setTimeout(async () => {
-      const sockets = await io.in(`user:${socket.userId}`).fetchSockets();
-
-      if (sockets.length === 0) {
-        await User.findByIdAndUpdate(socket.userId, {
-          status: "offline",
-          lastSeen: new Date(),
-        });
-
-        socket.broadcast.emit("user:offline", {
-          userId: socket.userId,
-          lastSeen: new Date(),
-        });
-      }
-    }, 120000); // 2 minutes
-  });
-});
-
-// ✅ Start server
+// ================== START SERVER ==================
 const PORT = process.env.PORT || 4000;
 
-server.listen(PORT, () => {
-  console.log(`🚀 API server running on port ${PORT}`);
-  console.log(`🔌 WebSocket server ready`);
-});
+const startServer = async () => {
+  try {
+    // Connect to MongoDB
+    await connectDB();
 
-// ✅ Export for use in other modules
-export { io };
-export default app;
+    // Connect to Redis
+    await connectRedis();
+
+    // Start HTTP server
+    httpServer.listen(PORT, () => {
+      console.log(`🚀 API server running on port ${PORT}`);
+      console.log(`🔌 WebSocket server ready`);
+      console.log(`📝 Environment: ${process.env.NODE_ENV || "development"}`);
+    });
+  } catch (error) {
+    console.error("❌ Server startup failed:", error);
+    process.exit(1);
+  }
+};
+
+startServer();
+
+// Graceful shutdown
+process.on("SIGTERM", () => {
+  console.log("SIGTERM signal received: closing HTTP server");
+  httpServer.close(() => {
+    console.log("HTTP server closed");
+  });
+});

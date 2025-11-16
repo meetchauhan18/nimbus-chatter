@@ -18,31 +18,28 @@ export class AuthService {
   /**
    * Register a new user
    */
-  async register({ phone, displayName, password, username }) {
-    // Check if user already exists
-    const existingUser = await User.findOne({ phone });
-    if (existingUser) {
-      throw new ConflictError("Phone number already registered");
+  async register({ email, username, password }) {
+    // Check if email already exists
+    const existingEmail = await User.findOne({ email });
+    if (existingEmail) {
+      throw new ConflictError("Email already registered");
     }
 
-    // Check username uniqueness if provided
-    if (username) {
-      const existingUsername = await User.findOne({ username });
-      if (existingUsername) {
-        throw new ConflictError("Username already taken");
-      }
+    // Check username uniqueness
+    const existingUsername = await User.findOne({ username });
+    if (existingUsername) {
+      throw new ConflictError("Username already taken");
     }
 
     // Create user
     const user = await User.create({
-      phone,
-      displayName,
-      password,
+      email,
       username,
+      password,
     });
 
     // Generate tokens
-    const accessToken = generateAccessToken(user._id, user.phone);
+    const accessToken = generateAccessToken(user._id, user.email);
     const refreshToken = generateRefreshToken(user._id);
 
     return {
@@ -55,10 +52,9 @@ export class AuthService {
   /**
    * Login existing user
    */
-  async login({ phone, password }) {
+  async login({ email, password }) {
     // Find user and explicitly include password field
-    const user = await User.findOne({ phone }).select("+password");
-
+    const user = await User.findOne({ email }).select("+password");
     if (!user) {
       throw new UnauthorizedError("Invalid credentials");
     }
@@ -70,7 +66,7 @@ export class AuthService {
     }
 
     // Generate tokens
-    const accessToken = generateAccessToken(user._id, user.phone);
+    const accessToken = generateAccessToken(user._id, user.email);
     const refreshToken = generateRefreshToken(user._id);
 
     // Update last login
@@ -92,20 +88,18 @@ export class AuthService {
       throw new BadRequestError("Refresh token is required");
     }
 
-    // Verify refresh token
     const decoded = verifyRefreshToken(refreshToken);
     if (!decoded) {
       throw new UnauthorizedError("Invalid or expired refresh token");
     }
 
-    // Find user
     const user = await User.findById(decoded.userId);
     if (!user) {
       throw new UnauthorizedError("User not found");
     }
 
-    // Generate new access token
-    const accessToken = generateAccessToken(user._id, user.phone);
+    // Generate new access token with email
+    const accessToken = generateAccessToken(user._id, user.email);
 
     return {
       accessToken,
@@ -118,12 +112,11 @@ export class AuthService {
    */
   sanitizeUser(user) {
     const userObj = user.toObject ? user.toObject() : user;
-
     return {
       id: userObj._id,
-      phone: userObj.phone,
-      displayName: userObj.displayName,
+      email: userObj.email,
       username: userObj.username,
+      displayName: userObj.displayName || userObj.username, // Fallback to username
       avatar: userObj.avatar,
       status: userObj.status,
       about: userObj.about,

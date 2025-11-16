@@ -1,11 +1,11 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
 const conversationSchema = new mongoose.Schema(
   {
     // 🗂 Type of chat: direct (1:1) or group
     type: {
       type: String,
-      enum: ['direct', 'group', 'broadcast'],
+      enum: ["direct", "group", "broadcast"],
       required: true,
     },
 
@@ -14,20 +14,20 @@ const conversationSchema = new mongoose.Schema(
       {
         user: {
           type: mongoose.Schema.Types.ObjectId,
-          ref: 'User',
+          ref: "User",
           required: true,
         },
         joinedAt: { type: Date, default: Date.now },
         role: {
           type: String,
-          enum: ['member', 'admin', 'owner'],
-          default: 'member',
+          enum: ["member", "admin", "owner"],
+          default: "member",
         },
         isMuted: { type: Boolean, default: false },
         pinned: { type: Boolean, default: false },
         lastReadMessage: {
           type: mongoose.Schema.Types.ObjectId,
-          ref: 'Message',
+          ref: "Message",
           default: null,
         },
       },
@@ -37,7 +37,7 @@ const conversationSchema = new mongoose.Schema(
     admins: [
       {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
+        ref: "User",
       },
     ],
 
@@ -51,7 +51,7 @@ const conversationSchema = new mongoose.Schema(
       },
       createdBy: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
+        ref: "User",
       },
       inviteLink: { type: String, default: null },
       isArchived: { type: Boolean, default: false },
@@ -60,7 +60,7 @@ const conversationSchema = new mongoose.Schema(
     // 💬 Message summary
     lastMessage: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Message',
+      ref: "Message",
       default: null,
     },
     lastMessageAt: {
@@ -85,14 +85,14 @@ const conversationSchema = new mongoose.Schema(
     // 🔒 Privacy
     visibility: {
       type: String,
-      enum: ['visible', 'hidden', 'archived'],
-      default: 'visible',
+      enum: ["visible", "hidden", "archived"],
+      default: "visible",
     },
 
     // 🧠 System Fields
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+      ref: "User",
       required: true,
     },
     isDeleted: { type: Boolean, default: false },
@@ -105,16 +105,16 @@ const conversationSchema = new mongoose.Schema(
 //
 // 🧩 Virtual for direct chat name (auto-resolves other user)
 //
-conversationSchema.virtual('displayName').get(function () {
-  if (this.type === 'direct') return 'Direct Chat';
-  return this.group?.name || 'Unnamed Group';
+conversationSchema.virtual("displayName").get(function () {
+  if (this.type === "direct") return "Direct Chat";
+  return this.group?.name || "Unnamed Group";
 });
 
 //
 // 🧂 Middleware: Keep lastMessageAt in sync
 //
-conversationSchema.pre('save', function (next) {
-  if (this.isModified('lastMessage')) {
+conversationSchema.pre("save", function (next) {
+  if (this.isModified("lastMessage")) {
     this.lastMessageAt = Date.now();
   }
   next();
@@ -123,12 +123,12 @@ conversationSchema.pre('save', function (next) {
 //
 // 🧠 Indexes for performance
 //
-conversationSchema.index({ 'participants.user': 1 });
+conversationSchema.index({ "participants.user": 1 });
 conversationSchema.index({ lastMessageAt: -1 });
 conversationSchema.index({ type: 1 });
-conversationSchema.index({ 'group.name': 'text' });
+conversationSchema.index({ "group.name": "text" });
 conversationSchema.index({ createdBy: 1 });
-conversationSchema.index({ 'participants.user': 1, type: 1 });
+conversationSchema.index({ "participants.user": 1, type: 1 });
 
 //
 // 🚀 Utility Methods
@@ -147,15 +147,84 @@ conversationSchema.methods.resetUnread = function (userId) {
 
 // Check if a user is admin
 conversationSchema.methods.isAdmin = function (userId) {
-  return this.admins?.some((adminId) => adminId.toString() === userId.toString());
+  return this.admins?.some(
+    (adminId) => adminId.toString() === userId.toString()
+  );
 };
 
 // Add new participant (for group)
-conversationSchema.methods.addParticipant = function (userId, role = 'member') {
+conversationSchema.methods.addParticipant = function (userId, role = "member") {
   if (!this.participants.some((p) => p.user.toString() === userId.toString())) {
     this.participants.push({ user: userId, role });
   }
 };
 
+// Remove participant (for group)
+conversationSchema.methods.removeParticipant = function (userId) {
+  this.participants = this.participants.filter(
+    (p) => p.user.toString() !== userId.toString()
+  );
+};
 
-export default mongoose.model('Conversation', conversationSchema);
+// Check if user is a participant
+conversationSchema.methods.isParticipant = function (userId) {
+  return this.participants.some((p) => p.user.toString() === userId.toString());
+};
+
+// Check if user is owner (creator of group)
+conversationSchema.methods.isOwner = function (userId) {
+  return this.group?.createdBy?.toString() === userId.toString();
+};
+
+// Get participant by userId
+conversationSchema.methods.getParticipant = function (userId) {
+  return this.participants.find((p) => p.user.toString() === userId.toString());
+};
+
+// Update participant role
+conversationSchema.methods.updateParticipantRole = function (userId, newRole) {
+  const participant = this.getParticipant(userId);
+  if (participant) {
+    participant.role = newRole;
+  }
+};
+
+// Promote to admin
+conversationSchema.methods.promoteToAdmin = function (userId) {
+  // Add to admins array if not already there
+  if (!this.isAdmin(userId)) {
+    this.admins.push(userId);
+  }
+  // Update participant role
+  this.updateParticipantRole(userId, "admin");
+};
+
+// Demote from admin
+conversationSchema.methods.demoteFromAdmin = function (userId) {
+  // Remove from admins array
+  this.admins = this.admins.filter(
+    (adminId) => adminId.toString() !== userId.toString()
+  );
+  // Update participant role
+  this.updateParticipantRole(userId, "member");
+};
+
+// Check if user has admin privileges (admin or owner)
+conversationSchema.methods.hasAdminPrivileges = function (userId) {
+  return this.isOwner(userId) || this.isAdmin(userId);
+};
+
+// Update group info (name, description, avatar)
+conversationSchema.methods.updateGroupInfo = function (updates) {
+  if (updates.name !== undefined) {
+    this.group.name = updates.name;
+  }
+  if (updates.description !== undefined) {
+    this.group.description = updates.description;
+  }
+  if (updates.avatar !== undefined) {
+    this.group.avatar = updates.avatar;
+  }
+};
+
+export default mongoose.model("Conversation", conversationSchema);

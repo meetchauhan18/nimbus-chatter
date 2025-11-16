@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 const messageSchema = new mongoose.Schema(
   {
-    // 🧩 Unique client-generated ID for deduplication (important for offline retries)
+    // 🧩 Unique client-generated ID for deduplication
     clientMsgId: {
       type: String,
       required: true,
@@ -10,7 +10,7 @@ const messageSchema = new mongoose.Schema(
       index: true,
     },
 
-    // 💬 Which conversation this message belongs to
+    // 💬 Conversation reference
     conversationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Conversation",
@@ -18,7 +18,7 @@ const messageSchema = new mongoose.Schema(
       index: true,
     },
 
-    // 👤 Who sent it
+    // 👤 Sender
     senderId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -26,7 +26,7 @@ const messageSchema = new mongoose.Schema(
       index: true,
     },
 
-    // 🔁 Reply to another message (for threaded messages)
+    // 🔁 Reply to another message
     replyTo: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Message",
@@ -45,42 +45,41 @@ const messageSchema = new mongoose.Schema(
         "emoji",
         "contact",
         "location",
-        "system", // e.g. "user added", "group name changed"
+        "system",
       ],
       required: true,
     },
 
-    // 🧾 Actual content (supports text or structured payloads)
+    // 🧾 Content
     content: {
       type: mongoose.Schema.Types.Mixed,
       required: true,
     },
 
-    // 🖼️ Media info (for non-text messages)
+    // 🖼️ Media info
     media: {
       url: { type: String, default: null },
-      publicId: { type: String, default: null }, // Cloudinary / CDN reference
+      publicId: { type: String, default: null },
       mimeType: { type: String, default: null },
-      size: { type: Number, default: 0 }, // bytes
-      duration: { type: Number, default: null }, // for audio/video
-      thumbnail: { type: String, default: null }, // base64 or CDN
+      size: { type: Number, default: 0 },
+      duration: { type: Number, default: null },
+      thumbnail: { type: String, default: null },
     },
 
-    // 🧩 System or contextual metadata
+    // 🧩 Metadata
     metadata: {
       type: mongoose.Schema.Types.Mixed,
       default: {},
     },
 
-    // ⚙️ Message lifecycle status
+    // ⚙️ Status
     status: {
       type: String,
       enum: ["pending", "sent", "delivered", "seen", "failed"],
       default: "sent",
-      index: true,
     },
 
-    // 📬 Delivery tracking (multi-device & group safe)
+    // 📬 Delivery tracking
     deliveredTo: [
       {
         userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
@@ -88,7 +87,7 @@ const messageSchema = new mongoose.Schema(
       },
     ],
 
-    // 👀 Seen tracking (per user, like blue ticks)
+    // 👀 Seen tracking
     seenBy: [
       {
         userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
@@ -102,7 +101,7 @@ const messageSchema = new mongoose.Schema(
       editedAt: { type: Date, default: null },
     },
 
-    // 🗑️ Message deletion (per user soft delete)
+    // 🗑️ Per-user soft delete
     deletedFor: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -110,14 +109,13 @@ const messageSchema = new mongoose.Schema(
       },
     ],
 
-    // ⏳ Optional ephemeral (auto-expiring) message settings
+    // ⏳ Ephemeral messages
     expiresAt: {
       type: Date,
       default: null,
-      index: { expires: "0s" }, // TTL index — MongoDB auto-deletes after expiry
     },
 
-    // 🔐 E2E encryption data
+    // 🔐 E2E encryption
     encryption: {
       cipherText: { type: String, default: null },
       iv: { type: String, default: null },
@@ -125,7 +123,7 @@ const messageSchema = new mongoose.Schema(
       version: { type: String, default: "v1" },
     },
 
-    // 🧠 Device origin (for multi-device sync)
+    // 🧠 Device info
     deviceInfo: {
       deviceId: { type: String, default: null },
       sentFrom: {
@@ -135,7 +133,7 @@ const messageSchema = new mongoose.Schema(
       },
     },
 
-    // 🧾 Reactions (❤️ 😂 👍 etc.)
+    // 🧾 Reactions
     reactions: [
       {
         emoji: { type: String, required: true },
@@ -144,7 +142,7 @@ const messageSchema = new mongoose.Schema(
       },
     ],
 
-    // 📅 Soft delete (system-level, not per user)
+    // 📅 System-level delete
     isDeleted: { type: Boolean, default: false },
   },
   {
@@ -152,20 +150,17 @@ const messageSchema = new mongoose.Schema(
   }
 );
 
-//
-// 🧩 Indexes for performance-critical queries
-//
+// ============ INDEXES ============
 messageSchema.index({ conversationId: 1, createdAt: -1 });
 messageSchema.index({ senderId: 1, createdAt: -1 });
 messageSchema.index({ "reactions.emoji": 1 });
 messageSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 messageSchema.index({ status: 1 });
+messageSchema.index({ conversationId: 1, isDeleted: 1 });
 
-//
-// 🧠 Schema Middleware
-//
+// ============ MIDDLEWARE ============
 
-// Keep track of edited state
+// Track edits
 messageSchema.pre("save", function (next) {
   if (this.isModified("content") && !this.isNew) {
     this.edited.isEdited = true;
@@ -174,22 +169,26 @@ messageSchema.pre("save", function (next) {
   next();
 });
 
-//
-// 🚀 Utility methods
-//
+// ============ INSTANCE METHODS ============
 
-// Mark message as delivered to a user
+/**
+ * Mark message as delivered to a user
+ */
 messageSchema.methods.markDelivered = function (userId) {
   const alreadyDelivered = this.deliveredTo.some(
     (d) => d.userId.toString() === userId.toString()
   );
   if (!alreadyDelivered) {
     this.deliveredTo.push({ userId, timestamp: Date.now() });
-    this.status = "delivered";
+    if (this.status === "sent") {
+      this.status = "delivered";
+    }
   }
 };
 
-// Mark message as seen by a user
+/**
+ * Mark message as seen by a user
+ */
 messageSchema.methods.markSeen = function (userId) {
   const alreadySeen = this.seenBy.some(
     (s) => s.userId.toString() === userId.toString()
@@ -197,15 +196,89 @@ messageSchema.methods.markSeen = function (userId) {
   if (!alreadySeen) {
     this.seenBy.push({ userId, timestamp: Date.now() });
     this.status = "seen";
+
+    // Also mark as delivered if not already
+    this.markDelivered(userId);
   }
 };
 
-// Clean output for API responses
+/**
+ * Check if user can edit (only sender, within 15 mins)
+ */
+messageSchema.methods.canEdit = function (userId) {
+  const fifteenMinutes = 15 * 60 * 1000;
+  const timeSinceCreated = Date.now() - this.createdAt.getTime();
+  return (
+    this.senderId.toString() === userId.toString() &&
+    timeSinceCreated < fifteenMinutes &&
+    !this.isDeleted &&
+    this.deletedFor.length === 0
+  );
+};
+
+/**
+ * Check if user can delete (only sender)
+ */
+messageSchema.methods.canDelete = function (userId) {
+  return (
+    this.senderId.toString() === userId.toString() &&
+    !this.isDeleted &&
+    !this.deletedFor.includes(userId)
+  );
+};
+
+/**
+ * Add reaction
+ */
+messageSchema.methods.addReaction = function (userId, emoji) {
+  const existingReaction = this.reactions.find(
+    (r) => r.userId.toString() === userId.toString() && r.emoji === emoji
+  );
+
+  if (!existingReaction) {
+    this.reactions.push({ userId, emoji, timestamp: Date.now() });
+  }
+};
+
+/**
+ * Remove reaction
+ */
+messageSchema.methods.removeReaction = function (userId, emoji) {
+  this.reactions = this.reactions.filter(
+    (r) => !(r.userId.toString() === userId.toString() && r.emoji === emoji)
+  );
+};
+
+/**
+ * Soft delete for specific user
+ */
+messageSchema.methods.deleteForUser = function (userId) {
+  if (!this.deletedFor.includes(userId)) {
+    this.deletedFor.push(userId);
+  }
+};
+
+/**
+ * Hard delete (system-level)
+ */
+messageSchema.methods.permanentDelete = function () {
+  this.isDeleted = true;
+  this.content = "This message was deleted";
+};
+
+/**
+ * Clean output for API
+ */
 messageSchema.methods.toJSON = function () {
   const obj = this.toObject();
   delete obj.__v;
+
+  // Hide encryption details if present
+  if (obj.encryption && !obj.encryption.cipherText) {
+    delete obj.encryption;
+  }
+
   return obj;
 };
-
 
 export default mongoose.model("Message", messageSchema);
