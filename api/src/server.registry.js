@@ -10,6 +10,11 @@ import rateLimit from "express-rate-limit";
 import { initRegistry } from "./bootstrap/initRegistry.js";
 import { registryContext } from "./core/middleware/registryContext.js";
 
+// Module imports
+import authModule from "./modules/auth/index.js";
+import messageModule from "./modules/message/index.js";
+import conversationModule from "./modules/conversation/index.js";
+
 // Middleware imports (KEEP - not yet migrated)
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { hstsMiddleware, httpsRedirect } from "./middleware/httpRedirect.js";
@@ -29,6 +34,10 @@ async function startServer() {
     // ===== PHASE 3: Registry + Module Loading =====
     console.log("🔧 Phase 3: Initializing registry with modules...");
     const registry = await initRegistry();
+    await registry.registerModule(authModule);
+    await registry.registerModule(messageModule);
+    await registry.registerModule(conversationModule);
+    console.log("✅ Phase 3 complete: Registry initialized with modules\n");
 
     // Resolve core services
     const logger = await registry.resolveAsync("core.logger");
@@ -100,9 +109,9 @@ async function startServer() {
       }
     });
 
-    // ===== DYNAMIC ROUTE MOUNTING =====
+    // ===== DYNAMIC ROUTE MOUNTING (Module-first, fallback to legacy) ===== 
 
-    // Auth Routes (Module-first, fallback to legacy)
+    // Mount auth Routes 
     if (registry.has("auth.routes")) {
       const authRoutes = await registry.resolveAsync("auth.routes");
       app.use("/api/auth", authRoutes);
@@ -113,7 +122,6 @@ async function startServer() {
       logger.warn("⚠️  Mounted: /api/auth (legacy fallback)");
     }
 
-    // In the route mounting section (around line 90):
     // Mount message routes
     if (registry.has("message.routes")) {
       const messageRoutes = await registry.resolveAsync("message.routes");
@@ -126,9 +134,21 @@ async function startServer() {
       logger.warn("⚠️ Using legacy message routes");
     }
 
-    // Conversation Routes (legacy for now)
-    app.use("/api/conversations", conversationRoutes);
-    logger.info("📦 Mounted: /api/conversations (legacy)");
+    // Mount conversation routes
+    if (registry.has("conversation.routes")) {
+      const conversationRoutes = await registry.resolveAsync(
+        "conversation.routes"
+      );
+      app.use("/api/conversations", conversationRoutes);
+      logger.info("✅ Mounted conversation routes");
+    } else {
+      // Fallback to legacy routes
+      const legacyConversationRoutes = await import(
+        "./routes/conversationRoutes.js"
+      );
+      app.use("/api/conversations", legacyConversationRoutes.default);
+      logger.warn("⚠️ Using legacy conversation routes");
+    }
 
     // User Routes (legacy for now)
     app.use("/api/users", userRoutes);
