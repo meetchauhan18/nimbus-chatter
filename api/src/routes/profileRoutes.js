@@ -2,7 +2,7 @@ import express from "express";
 import {
   getProfile,
   updateProfile,
-  uploadAvatar,
+  uploadAvatar as uploadAvatarController,
   deleteAvatar,
   changePassword,
   requestPasswordReset,
@@ -10,7 +10,6 @@ import {
   updatePrivacySettings,
 } from "../controllers/profileController.js";
 import { verifyAccessToken } from "../middleware/auth.js";
-import { upload } from "../config/cloudinary.js";
 import { validate } from "../middleware/validate.js";
 import {
   updateProfileSchema,
@@ -18,6 +17,7 @@ import {
   requestPasswordResetSchema,
   resetPasswordSchema,
 } from "../validators/profile.validator.js";
+import { uploadAvatar } from "../config/cloudinary.js";
 
 const router = express.Router();
 
@@ -33,16 +33,16 @@ router.post(
   "/avatar",
   verifyAccessToken,
   (req, res, next) => {
-    console.log("➡️ Multer upload called for avatar upload");
+    console.log("➡️ Multer uploadAvatar called for avatar upload");
     next();
   },
-  upload.single("avatar"),
+  uploadAvatar.single("avatar"),
   (req, res, next) => {
     console.log("✅ File received by multer:", req.file?.originalname);
     console.log("📦 File details:", req.file);
     next();
   },
-  uploadAvatar
+  uploadAvatarController
 );
 router.delete("/avatar", verifyAccessToken, deleteAvatar);
 router.post(
