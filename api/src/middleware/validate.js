@@ -1,23 +1,16 @@
-import { ValidationError } from "../utils/AppError.js";
+import { ValidationError } from "../shared/errors/index.js";
 
-export const validate = (schema, property = "body") => {
+export const validate = (schema) => {
   return (req, res, next) => {
-    const { error, value } = schema.validate(req[property], {
-      abortEarly: false, // Return all errors, not just first
-      stripUnknown: true, // Remove unknown fields
-    });
+    const { error } = schema.validate(req.body, { abortEarly: false });
 
     if (error) {
-      const errors = error.details.map((detail) => ({
-        field: detail.path.join("."),
-        message: detail.message,
-      }));
-
-      return next(new ValidationError(errors[0].message));
+      const messages = error.details.map((detail) => detail.message);
+      throw new ValidationError(messages.join(", "));
     }
 
-    // Replace request data with validated/sanitized data
-    req[property] = value;
     next();
   };
 };
+
+export default validate;

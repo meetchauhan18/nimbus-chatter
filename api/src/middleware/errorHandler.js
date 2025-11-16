@@ -1,15 +1,10 @@
-import { AppError } from "../utils/AppError.js";
-import { errorResponse } from "../utils/response.js";
+import { AppError } from "../shared/errors/index.js";
+import { errorResponse } from "../shared/utils/response.js";
 
-/**
- * Global Error Handler Middleware
- * Catches all errors and sends consistent error responses
- */
 export const errorHandler = (err, req, res, next) => {
   let error = { ...err };
   error.message = err.message;
 
-  // Log error for debugging (in production, use proper logger)
   console.error("Error:", {
     message: err.message,
     stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
@@ -45,22 +40,14 @@ export const errorHandler = (err, req, res, next) => {
     error = new AppError("Token expired", 401);
   }
 
-  res
-    .status(error.statusCode || 500)
-    .json(
-      errorResponse(
-        error.message || "Internal Server Error",
-        process.env.NODE_ENV === "development" ? { stack: err.stack } : null,
-        error.statusCode || 500
-      )
-    );
+  errorResponse(
+    res,
+    error.message || "Internal Server Error",
+    error.statusCode || 500,
+    process.env.NODE_ENV === "development" ? { stack: err.stack } : null
+  );
 };
 
-/**
- * 404 Not Found Handler
- * Catches all unmatched routes
- */
-export const notFoundHandler = (req, res, next) => {
-  const error = new AppError(`Route ${req.originalUrl} not found`, 404);
-  next(error);
+export const notFoundHandler = (req, res) => {
+  errorResponse(res, `Route ${req.originalUrl} not found`, 404);
 };
