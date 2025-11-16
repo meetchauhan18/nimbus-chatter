@@ -1,6 +1,6 @@
 import { profileService } from "../services/profile.service.js";
-import { asyncHandler } from "../utils/asyncHandler.js";
-import { successResponse } from "../utils/response.js";
+import { asyncHandler } from "../shared/utils/asyncHandler.js";
+import { successResponse } from "../shared/utils/response.js";
 
 export const getProfile = asyncHandler(async (req, res) => {
   const user = await profileService.getUserProfile(req.user?.userId);

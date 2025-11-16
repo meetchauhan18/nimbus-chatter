@@ -1,7 +1,7 @@
-import { asyncHandler } from "../utils/asyncHandler.js";
+import { asyncHandler } from "../shared/utils/asyncHandler.js";
 import { conversationService } from "../services/conversation.service.js";
 import { groupService } from "../services/group.service.js";
-import { successResponse } from "../utils/response.js";
+import { successResponse } from "../shared/utils/response.js";
 
 export const getConversations = asyncHandler(async (req, res) => {
   const userId = req.user.userId;

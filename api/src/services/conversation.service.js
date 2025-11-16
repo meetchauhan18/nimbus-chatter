@@ -1,5 +1,5 @@
 import Conversation from "../models/Conversation.js";
-import { NotFoundError, BadRequestError } from "../utils/AppError.js";
+import { NotFoundError, BadRequestError } from "../shared/errors/index.js";
 
 export class ConversationService {
   /**

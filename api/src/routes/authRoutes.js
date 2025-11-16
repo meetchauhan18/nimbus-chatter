@@ -12,7 +12,7 @@ import {
   refreshTokenSchema,
 } from "../validators/auth.validator.js";
 import { verifyAccessToken } from "../middleware/auth.js";
-import { inspectToken, checkServerTime } from "../utils/verifyToken.js";
+import { inspectToken, checkServerTime } from "../shared/utils/verifyToken.js";
 
 const router = express.Router();
 

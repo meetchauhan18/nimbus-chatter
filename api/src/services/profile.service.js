@@ -4,7 +4,7 @@ import {
   NotFoundError,
   BadRequestError,
   UnauthorizedError,
-} from "../utils/AppError.js";
+} from "../shared/errors/index.js";
 import { emailService } from "./email.service.js";
 import crypto from "crypto";
 

@@ -1,5 +1,5 @@
 import cloudinary from "../config/cloudinary.js";
-import { BadRequestError } from "../utils/AppError.js";
+import { BadRequestError } from "../shared/errors/index.js";
 
 export class MediaService {
   /**

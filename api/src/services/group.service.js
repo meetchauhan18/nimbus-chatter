@@ -4,7 +4,7 @@ import {
   NotFoundError,
   ForbiddenError,
   BadRequestError,
-} from "../utils/AppError.js";
+} from "../shared/errors/index.js";
 
 export class GroupService {
   /**

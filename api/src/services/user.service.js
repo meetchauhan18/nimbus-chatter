@@ -1,5 +1,5 @@
 import User from "../models/user.js";
-import { NotFoundError, BadRequestError } from "../utils/AppError.js";
+import { NotFoundError, BadRequestError } from "../shared/errors/index.js";
 
 export class UserService {
   /**

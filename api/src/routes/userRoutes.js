@@ -1,8 +1,8 @@
 import express from "express";
 import { verifyAccessToken } from "../middleware/auth.js";
-import { asyncHandler } from "../utils/asyncHandler.js";
+import { asyncHandler } from "../shared/utils/asyncHandler.js";
 import { userService } from "../services/user.service.js";
-import { successResponse } from "../utils/response.js";
+import { successResponse } from "../shared/utils/response.js";
 
 const router = express.Router();
 

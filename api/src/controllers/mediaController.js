@@ -1,7 +1,7 @@
-import { asyncHandler } from "../utils/asyncHandler.js";
+import { asyncHandler } from "../shared/utils/asyncHandler.js";
 import { mediaService } from "../services/media.service.js";
 import { messageService } from "../services/message.service.js";
-import { successResponse } from "../utils/response.js";
+import { successResponse } from "../shared/utils/response.js";
 
 /**
  * Upload chat image

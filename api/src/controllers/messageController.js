@@ -1,6 +1,6 @@
-import { asyncHandler } from "../utils/asyncHandler.js";
+import { asyncHandler } from "../shared/utils/asyncHandler.js";
 import { messageService } from "../services/message.service.js";
-import { successResponse } from "../utils/response.js";
+import { successResponse } from "../shared/utils/response.js";
 
 /**
  * Get messages for a conversation

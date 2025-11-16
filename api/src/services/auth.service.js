@@ -8,7 +8,7 @@ import {
   ConflictError,
   UnauthorizedError,
   BadRequestError,
-} from "../utils/AppError.js";
+} from "../shared/errors/index.js";
 
 /**
  * Authentication Service
