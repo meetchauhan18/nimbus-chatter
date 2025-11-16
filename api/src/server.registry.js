@@ -1,42 +1,40 @@
-import express from 'express';
-import http from 'http';
-import cors from 'cors';
-import helmet from 'helmet';
-import morgan from 'morgan';
-import compression from 'compression';
-import rateLimit from 'express-rate-limit';
+import express from "express";
+import http from "http";
+import cors from "cors";
+import helmet from "helmet";
+import morgan from "morgan";
+import compression from "compression";
+import rateLimit from "express-rate-limit";
 
 // Registry bootstrap
-import { initRegistry } from './bootstrap/initRegistry.js';
-import { registryContext } from './core/middleware/registryContext.js';
+import { initRegistry } from "./bootstrap/initRegistry.js";
+import { registryContext } from "./core/middleware/registryContext.js";
 
 // Middleware imports (KEEP - not yet migrated)
-import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
-import { hstsMiddleware, httpsRedirect } from './middleware/httpRedirect.js';
+import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
+import { hstsMiddleware, httpsRedirect } from "./middleware/httpRedirect.js";
 
-// Route imports (KEEP - not yet migrated)
-import authRoutes from './routes/authRoutes.js';
-import conversationRoutes from './routes/conversationRoutes.js';
-import userRoutes from './routes/userRoutes.js';
-import profileRoutes from './routes/profileRoutes.js';
-import messageRoutes from './routes/messageRoutes.js';
-import mediaRoutes from './routes/mediaRoutes.js';
+// Legacy route imports (fallback only)
+import conversationRoutes from "./routes/conversationRoutes.js";
+import userRoutes from "./routes/userRoutes.js";
+import profileRoutes from "./routes/profileRoutes.js";
+import messageRoutes from "./routes/messageRoutes.js";
+import mediaRoutes from "./routes/mediaRoutes.js";
 
 // Socket imports (KEEP - not yet migrated)
-import { initializeSocket } from './sockets/index.js';
+import { initializeSocket } from "./sockets/index.js";
 
 async function startServer() {
   try {
-    // ===== PHASE 2: Registry-First Bootstrap =====
-    console.log('🔧 Phase 2: Initializing registry...');
+    // ===== PHASE 3: Registry + Module Loading =====
+    console.log("🔧 Phase 3: Initializing registry with modules...");
     const registry = await initRegistry();
 
     // Resolve core services
-    const logger = await registry.resolveAsync('core.logger');
-    const config = await registry.resolveAsync('core.config');
-    const database = await registry.resolveAsync('core.database');
-    const redis = await registry.resolveAsync('core.redis');
-    const eventBus = await registry.resolveAsync('core.eventBus');
+    const logger = await registry.resolveAsync("core.logger");
+    const config = await registry.resolveAsync("core.config");
+    const database = await registry.resolveAsync("core.database");
+    const redis = await registry.resolveAsync("core.redis");
 
     // Create Express app
     const app = express();
@@ -46,7 +44,7 @@ async function startServer() {
     app.use(registryContext(registry));
 
     // ===== Security middleware =====
-    if (config.env === 'production') {
+    if (config.env === "production") {
       app.use(httpsRedirect);
       app.use(hstsMiddleware);
     }
@@ -56,52 +54,84 @@ async function startServer() {
 
     // ===== General middleware =====
     app.use(compression());
-    app.use(morgan('dev'));
-    app.use(express.json({ limit: '10mb' }));
-    app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+    app.use(morgan("dev"));
+    app.use(express.json({ limit: "10mb" }));
+    app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
     // ===== Rate limiting =====
     const limiter = rateLimit({
       windowMs: 15 * 60 * 1000,
       max: 100,
-      message: 'Too many requests from this IP',
+      message: "Too many requests from this IP",
     });
-    app.use('/api/', limiter);
+    app.use("/api/", limiter);
 
     // ===== Health check (Registry-aware) =====
-    app.get('/health', async (req, res) => {
+    app.get("/health", async (req, res) => {
       try {
         const dbHealth = await database.checkHealth();
         const redisHealth = await redis.checkHealth();
-        const isHealthy = dbHealth.isConnected && redisHealth.status === 'connected';
+        const isHealthy =
+          dbHealth.isConnected && redisHealth.status === "connected";
+
+        // Count loaded modules
+        const moduleCount = Array.from(registry._modules.keys()).filter(
+          (name) => name !== "core"
+        ).length;
 
         res.status(isHealthy ? 200 : 503).json({
-          status: isHealthy ? 'healthy' : 'unhealthy',
+          status: isHealthy ? "healthy" : "unhealthy",
           timestamp: new Date().toISOString(),
           services: {
             database: dbHealth,
             redis: redisHealth,
             registry: {
               servicesRegistered: registry.listServices().length,
+              modulesLoaded: moduleCount,
             },
           },
         });
       } catch (error) {
-        logger.error('Health check failed:', error);
+        logger.error("Health check failed:", error);
         res.status(503).json({
-          status: 'unhealthy',
+          status: "unhealthy",
           error: error.message,
         });
       }
     });
 
-    // ===== Routes (BACKWARD COMPATIBLE - still use old imports) =====
-    app.use('/api/auth', authRoutes);
-    app.use('/api/conversations', conversationRoutes);
-    app.use('/api/users', userRoutes);
-    app.use('/api/profile', profileRoutes);
-    app.use('/api/messages', messageRoutes);
-    app.use('/api/media', mediaRoutes);
+    // ===== DYNAMIC ROUTE MOUNTING =====
+
+    // Auth Routes (Module-first, fallback to legacy)
+    if (registry.has("auth.routes")) {
+      const authRoutes = await registry.resolveAsync("auth.routes");
+      app.use("/api/auth", authRoutes);
+      logger.info("✅ Mounted: /api/auth (from auth module)");
+    } else {
+      const legacyAuthRoutes = await import("./routes/authRoutes.js");
+      app.use("/api/auth", legacyAuthRoutes.default);
+      logger.warn("⚠️  Mounted: /api/auth (legacy fallback)");
+    }
+
+    // Conversation Routes (legacy for now)
+    app.use("/api/conversations", conversationRoutes);
+    logger.info("📦 Mounted: /api/conversations (legacy)");
+
+    // User Routes (legacy for now)
+    app.use("/api/users", userRoutes);
+    logger.info("📦 Mounted: /api/users (legacy)");
+
+    // Profile Routes (legacy for now)
+    app.use("/api/profile", profileRoutes);
+    logger.info("📦 Mounted: /api/profile (legacy)");
+
+    // Message Routes (legacy for now)
+    app.use("/api/messages", messageRoutes);
+    logger.info("📦 Mounted: /api/messages (legacy)");
+
+    // Media Routes (legacy for now)
+    app.use("/api/media", mediaRoutes);
+    logger.info("📦 Mounted: /api/media (legacy)");
 
     // ===== Error handling =====
     app.use(notFoundHandler);
@@ -120,35 +150,66 @@ async function startServer() {
 
     // ===== Start server =====
     server.listen(config.port, () => {
+      logger.info("═══════════════════════════════════════════");
       logger.info(`🚀 Server running on port ${config.port}`);
       logger.info(`📡 Environment: ${config.env}`);
       logger.info(`🌐 Client URL: ${config.client.url}`);
-      logger.info(`📦 Registry: ${registry.listServices().length} services`);
+      logger.info(`═══════════════════════════════════════════`);
+      logger.info(`📦 Registry Statistics:`);
+      logger.info(`   • Services: ${registry.listServices().length}`);
+      logger.info(
+        `   • Modules: ${Array.from(registry._modules.keys()).join(", ")}`
+      );
+      logger.info("═══════════════════════════════════════════");
     });
 
     // ===== Graceful shutdown =====
     const shutdown = async () => {
-      logger.info('Shutting down gracefully...');
-      
-      // Use registry destroy hooks
-      if (registry._modules.has('core')) {
-        const coreModule = registry._modules.get('core');
-        if (coreModule.definition.destroy) {
-          await coreModule.definition.destroy(registry);
-        }
-      }
+      logger.info("🛑 Shutting down gracefully...");
 
-      server.close(() => {
-        logger.info('Server closed');
-        process.exit(0);
+      // Close server first
+      server.close(async () => {
+        try {
+          // Destroy all modules in reverse order
+          const modules = Array.from(registry._modules.keys()).reverse();
+          for (const moduleName of modules) {
+            const module = registry._modules.get(moduleName);
+            if (module.definition.destroy) {
+              logger.info(`Destroying module: ${moduleName}`);
+              await module.definition.destroy(registry);
+            }
+          }
+
+          logger.info("✅ Graceful shutdown complete");
+          process.exit(0);
+        } catch (error) {
+          logger.error("Error during shutdown:", error);
+          process.exit(1);
+        }
       });
+
+      // Force exit after 10 seconds
+      setTimeout(() => {
+        logger.error("❌ Forced shutdown after timeout");
+        process.exit(1);
+      }, 10000);
     };
 
-    process.on('SIGTERM', shutdown);
-    process.on('SIGINT', shutdown);
+    process.on("SIGTERM", shutdown);
+    process.on("SIGINT", shutdown);
 
+    // Handle uncaught errors
+    process.on("unhandledRejection", (reason, promise) => {
+      logger.error("Unhandled Rejection at:", promise, "reason:", reason);
+    });
+
+    process.on("uncaughtException", (error) => {
+      logger.error("Uncaught Exception:", error);
+      shutdown();
+    });
   } catch (error) {
-    console.error('❌ Failed to start server:', error);
+    console.error("❌ Failed to start server:", error);
+    console.error(error.stack);
     process.exit(1);
   }
 }

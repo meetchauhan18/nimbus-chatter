@@ -1,12 +1,13 @@
 import { readdir, access } from "fs/promises";
 import { join, dirname } from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { constants } from "fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
  * ModuleLoader - Discovers and loads modules dynamically
+ * FIXED: Windows path support for dynamic imports
  */
 export class ModuleLoader {
   constructor(registry, modulesPath = null) {
@@ -72,11 +73,16 @@ export class ModuleLoader {
 
   /**
    * Load single module by name
+   * FIXED: Convert Windows paths to file:// URLs
    */
   async loadModule(name) {
     try {
       const modulePath = join(this.modulesPath, name, "index.js");
-      const module = await import(modulePath);
+
+      // Convert absolute path to file:// URL (cross-platform)
+      const moduleUrl = pathToFileURL(modulePath).href;
+
+      const module = await import(moduleUrl);
       const definition = module.default;
 
       if (!definition) {
