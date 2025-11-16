@@ -1,25 +1,17 @@
-import { cacheClient } from '../../config/redis.js';
-
 /**
  * MessageQueue - Handles offline message delivery
- * Queues messages for offline users and delivers on reconnection
+ * NOW ACCEPTS Redis client via dependency injection
  */
 export class MessageQueue {
-  constructor() {
-    this.redis = cacheClient;
+  constructor(redisClient) {
+    this.redis = redisClient;
   }
 
-  /**
-   * Queue a message for offline user
-   */
   async enqueue(userId, message) {
     try {
       const queueKey = `queue:${userId}`;
       await this.redis.lpush(queueKey, JSON.stringify(message));
-      
-      // Set expiry (7 days)
       await this.redis.expire(queueKey, 7 * 24 * 60 * 60);
-      
       console.log(`📬 Queued message for offline user: ${userId}`);
       return true;
     } catch (error) {
@@ -28,20 +20,15 @@ export class MessageQueue {
     }
   }
 
-  /**
-   * Flush all queued messages for a user
-   */
   async flush(userId) {
     try {
       const queueKey = `queue:${userId}`;
       const messages = await this.redis.lrange(queueKey, 0, -1);
-      
       if (messages.length > 0) {
         await this.redis.del(queueKey);
         console.log(`📨 Flushed ${messages.length} queued messages for user: ${userId}`);
-        return messages.map(msg => JSON.parse(msg));
+        return messages.map((msg) => JSON.parse(msg));
       }
-      
       return [];
     } catch (error) {
       console.error('MessageQueue flush error:', error);
@@ -49,9 +36,6 @@ export class MessageQueue {
     }
   }
 
-  /**
-   * Get queue length for a user
-   */
   async getQueueLength(userId) {
     try {
       const queueKey = `queue:${userId}`;
@@ -62,9 +46,6 @@ export class MessageQueue {
     }
   }
 
-  /**
-   * Clear queue for a user
-   */
   async clear(userId) {
     try {
       const queueKey = `queue:${userId}`;
@@ -78,5 +59,4 @@ export class MessageQueue {
   }
 }
 
-// Singleton instance
-export const messageQueue = new MessageQueue();
+export default MessageQueue;

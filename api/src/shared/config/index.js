@@ -1,7 +1,4 @@
-import dotenv from 'dotenv';
-
-dotenv.config();
-
+// Environment variables are provided by Docker Compose via .env file
 export const config = {
   env: process.env.NODE_ENV || 'development',
   port: parseInt(process.env.PORT || '4000', 10),
@@ -11,10 +8,9 @@ export const config = {
   },
   
   redis: {
-    host: process.env.REDIS_HOST || 'localhost',
+    host: process.env.REDIS_HOST,
     port: parseInt(process.env.REDIS_PORT || '6379', 10),
     password: process.env.REDIS_PASSWORD,
-    url: process.env.REDIS_URL || 'redis://localhost:6379',
   },
   
   jwt: {

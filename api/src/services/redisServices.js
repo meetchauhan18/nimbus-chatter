@@ -1,55 +1,52 @@
-const cacheClient = require("../config/redis.js");
-
-
 class RedisService {
-  // User session management
+  constructor(redisClient) {
+    this.redis = redisClient;
+  }
+
   async setUserSession(userId, data, ttl = 86400) {
-    await cacheClient.setex(`session:${userId}`, ttl, JSON.stringify(data));
+    await this.redis.setex(`session:${userId}`, ttl, JSON.stringify(data));
   }
 
   async getUserSession(userId) {
-    const data = await cacheClient.get(`session:${userId}`);
+    const data = await this.redis.get(`session:${userId}`);
     return data ? JSON.parse(data) : null;
   }
 
-  // Online presence
   async setUserOnline(userId) {
-    await cacheClient.zadd("presence:online", Date.now(), userId);
+    await this.redis.zadd("presence:online", Date.now(), userId);
   }
 
   async setUserOffline(userId) {
-    await cacheClient.zrem("presence:online", userId);
+    await this.redis.zrem("presence:online", userId);
   }
 
   async getOnlineUsers() {
-    return await cacheClient.zrange("presence:online", 0, -1);
+    return await this.redis.zrange("presence:online", 0, -1);
   }
 
-  // Typing indicators
   async setTyping(conversationId, userId) {
-    await cacheClient.sadd(`typing:${conversationId}`, userId);
-    await cacheClient.expire(`typing:${conversationId}`, 5);
+    await this.redis.sadd(`typing:${conversationId}`, userId);
+    await this.redis.expire(`typing:${conversationId}`, 5);
   }
 
   async removeTyping(conversationId, userId) {
-    await cacheClient.srem(`typing:${conversationId}`, userId);
+    await this.redis.srem(`typing:${conversationId}`, userId);
   }
 
   async getTypingUsers(conversationId) {
-    return await cacheClient.smembers(`typing:${conversationId}`);
+    return await this.redis.smembers(`typing:${conversationId}`);
   }
 
-  // Unread counts
   async incrementUnread(userId, conversationId) {
-    await cacheClient.hincrby(`unread:${userId}`, conversationId, 1);
+    await this.redis.hincrby(`unread:${userId}`, conversationId, 1);
   }
 
   async resetUnread(userId, conversationId) {
-    await cacheClient.hdel(`unread:${userId}`, conversationId);
+    await this.redis.hdel(`unread:${userId}`, conversationId);
   }
 
   async getUnreadCounts(userId) {
-    const counts = await cacheClient.hgetall(`unread:${userId}`);
+    const counts = await this.redis.hgetall(`unread:${userId}`);
     return Object.entries(counts).reduce((acc, [key, val]) => {
       acc[key] = parseInt(val);
       return acc;
@@ -57,4 +54,4 @@ class RedisService {
   }
 }
 
-export default new RedisService();
+export default RedisService;

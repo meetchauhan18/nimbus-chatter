@@ -2,7 +2,7 @@ import {
   generateAccessToken,
   generateRefreshToken,
   verifyRefreshToken,
-} from "../config/jwt.js";
+} from "../shared/utils/jwt.js";
 import User from "../models/user.js";
 import {
   ConflictError,

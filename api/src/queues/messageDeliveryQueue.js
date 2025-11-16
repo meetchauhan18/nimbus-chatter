@@ -1,19 +1,21 @@
 import { Queue, Worker, QueueEvents } from "bullmq";
-import { cacheClient } from "../config/redis.js";
-import { connectionManager } from "../sockets/managers/ConnectionManager.js";
+import { config } from "../shared/config/index.js";
 
 /**
  * Message Delivery Queue using BullMQ
- * Handles reliable message delivery with retry logic
+ * NOW ACCEPTS connectionManager instance via dependency injection
  */
 
 // ============ QUEUE CONFIGURATION ============
 
 const queueConnection = {
-  host: process.env.REDIS_HOST || "redis",
-  port: parseInt(process.env.REDIS_PORT) || 6379,
-  password: process.env.REDIS_PASSWORD || undefined,
+  host: config.redis.host, // Uses your .env REDIS_HOST
+  port: config.redis.port, // Uses your .env REDIS_PORT
+  password: config.redis.password, // Uses your .env REDIS_PASSWORD
   maxRetriesPerRequest: null,
+  enableOfflineQueue: false, // Fail fast if Redis is down
+  connectTimeout: 10000,
+  family: 4,
 };
 
 // ============ CREATE QUEUE ============
@@ -21,18 +23,18 @@ const queueConnection = {
 export const messageDeliveryQueue = new Queue("message-delivery", {
   connection: queueConnection,
   defaultJobOptions: {
-    attempts: 5, // Retry up to 5 times
+    attempts: 5,
     backoff: {
       type: "exponential",
-      delay: 2000, // Start with 2 seconds, doubles each retry
+      delay: 2000,
     },
     removeOnComplete: {
-      age: 3600, // Keep completed jobs for 1 hour
-      count: 1000, // Keep last 1000 completed jobs
+      age: 3600,
+      count: 1000,
     },
     removeOnFail: {
-      age: 86400, // Keep failed jobs for 24 hours
-      count: 5000, // Keep last 5000 failed jobs
+      age: 86400,
+      count: 5000,
     },
   },
 });
@@ -57,7 +59,13 @@ queueEvents.on("progress", ({ jobId, data }) => {
 
 // ============ WORKER ============
 
-export const createMessageDeliveryWorker = (io) => {
+export const createMessageDeliveryWorker = (io, connectionManager) => {
+  if (!connectionManager) {
+    throw new Error(
+      "ConnectionManager is required for message delivery worker"
+    );
+  }
+
   const worker = new Worker(
     "message-delivery",
     async (job) => {
@@ -84,10 +92,10 @@ export const createMessageDeliveryWorker = (io) => {
     },
     {
       connection: queueConnection,
-      concurrency: 10, // Process 10 jobs concurrently
+      concurrency: 10,
       limiter: {
-        max: 100, // Max 100 jobs
-        duration: 1000, // per second
+        max: 100,
+        duration: 1000,
       },
     }
   );
@@ -101,10 +109,8 @@ export const createMessageDeliveryWorker = (io) => {
   worker.on("failed", (job, err) => {
     console.error(`❌ Worker failed job ${job.id}:`, err.message);
 
-    // Move to dead letter queue after all retries exhausted
     if (job.attemptsMade >= job.opts.attempts) {
       console.error(`☠️ Job ${job.id} moved to dead letter queue`);
-      // You can implement custom DLQ handling here
     }
   });
 
@@ -116,6 +122,7 @@ export const createMessageDeliveryWorker = (io) => {
     console.warn(`⚠️ Job ${jobId} stalled (may be retried)`);
   });
 
+  console.log("✅ Message delivery worker initialized");
   return worker;
 };
 
@@ -142,8 +149,8 @@ export async function queueMessageDelivery(
         queuedAt: Date.now(),
       },
       {
-        priority, // Higher number = higher priority
-        jobId: `msg-${messageId}-${userId}`, // Unique job ID prevents duplicates
+        priority,
+        jobId: `msg-${messageId}-${userId}`,
       }
     );
 
@@ -189,8 +196,8 @@ export async function getQueueStats() {
  */
 export async function cleanOldJobs() {
   try {
-    await messageDeliveryQueue.clean(3600000, 1000, "completed"); // 1 hour
-    await messageDeliveryQueue.clean(86400000, 5000, "failed"); // 24 hours
+    await messageDeliveryQueue.clean(3600000, 1000, "completed");
+    await messageDeliveryQueue.clean(86400000, 5000, "failed");
     console.log("🧹 Cleaned old queue jobs");
   } catch (error) {
     console.error("Error cleaning jobs:", error);

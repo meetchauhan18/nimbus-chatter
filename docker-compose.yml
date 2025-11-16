@@ -37,29 +37,12 @@ services:
     restart: unless-stopped
     ports:
       - "4000:4000"
+    env_file:
+      - .env  # ✅ LOAD ROOT .env FILE
     environment:
+      # ✅ OVERRIDE DOCKER-SPECIFIC VARS
+      REDIS_HOST: redis
       NODE_ENV: development
-      PORT: 4000
-      MONGODB_URI: ${MONGODB_URI}
-      REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
-      JWT_ACCESS_EXPIRY: ${JWT_ACCESS_EXPIRY:-1d}
-      JWT_REFRESH_EXPIRY: ${JWT_REFRESH_EXPIRY:-7d}
-      CLIENT_URL: http://localhost:5173
-      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
-      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
-      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
-      EMAIL_HOST: ${EMAIL_HOST}
-      EMAIL_PORT: ${EMAIL_PORT}
-      EMAIL_USER: ${EMAIL_USER}
-      EMAIL_PASSWORD: ${EMAIL_PASSWORD}
-      EMAIL_FROM: ${EMAIL_FROM}
-      FRONTEND_URL: http://localhost:5173
-      MAX_FILE_SIZE_MB: 10
-      MAX_IMAGE_SIZE_MB: 5
-      MAX_VIDEO_SIZE_MB: 50
-      MAX_AUDIO_SIZE_MB: 10
     volumes:
       - ./api:/app
       - /app/node_modules
@@ -92,6 +75,8 @@ services:
     restart: unless-stopped
     ports:
       - "5173:5173"
+    env_file:
+      - .env  # ✅ LOAD ROOT .env FILE
     environment:
       VITE_API_URL: http://localhost:4000
       VITE_WS_URL: ws://localhost:4000

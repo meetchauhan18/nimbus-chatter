@@ -1,12 +1,11 @@
-import { cacheClient } from "../config/redis.js";
-
 /**
  * Cache Service
  * Provides caching utilities with TTL and invalidation
+ * NOW ACCEPTS Redis client via dependency injection
  */
 class CacheService {
-  constructor() {
-    this.redis = cacheClient;
+  constructor(redisClient) {
+    this.redis = redisClient;
 
     // TTL configurations (in seconds)
     this.TTL = {
@@ -20,15 +19,8 @@ class CacheService {
     };
   }
 
-  // =============== USER CACHING ===============
-
-  /**
-   * Cache user profile
-   */
-  // Change all references from phone to email
   async cacheUser(userId, userData) {
     const key = `user:${userId}`;
-    // Ensure userData contains email instead of phone
     try {
       await this.redis.setex(
         key,
@@ -42,9 +34,6 @@ class CacheService {
     }
   }
 
-  /**
-   * Get cached user profile
-   */
   async getUser(userId) {
     const key = `user:${userId}`;
     try {
@@ -56,9 +45,6 @@ class CacheService {
     }
   }
 
-  /**
-   * Invalidate user cache
-   */
   async invalidateUser(userId) {
     const key = `user:${userId}`;
     try {
@@ -70,11 +56,6 @@ class CacheService {
     }
   }
 
-  // =============== CONVERSATION CACHING ===============
-
-  /**
-   * Cache conversation participants
-   */
   async cacheConversationParticipants(conversationId, participants) {
     const key = `conv:participants:${conversationId}`;
     try {
@@ -90,9 +71,6 @@ class CacheService {
     }
   }
 
-  /**
-   * Get cached conversation participants
-   */
   async getConversationParticipants(conversationId) {
     const key = `conv:participants:${conversationId}`;
     try {
@@ -104,9 +82,6 @@ class CacheService {
     }
   }
 
-  /**
-   * Cache conversation metadata
-   */
   async cacheConversation(conversationId, conversationData) {
     const key = `conv:${conversationId}`;
     try {
@@ -122,9 +97,6 @@ class CacheService {
     }
   }
 
-  /**
-   * Get cached conversation
-   */
   async getConversation(conversationId) {
     const key = `conv:${conversationId}`;
     try {
@@ -136,15 +108,11 @@ class CacheService {
     }
   }
 
-  /**
-   * Invalidate conversation caches
-   */
   async invalidateConversation(conversationId) {
     const keys = [
       `conv:${conversationId}`,
       `conv:participants:${conversationId}`,
     ];
-
     try {
       await this.redis.del(...keys);
       return true;
@@ -154,19 +122,13 @@ class CacheService {
     }
   }
 
-  // =============== PRESENCE CACHING ===============
-
-  /**
-   * Cache user presence status
-   */
   async setPresence(userId, status, lastSeen = null) {
     const key = `presence:${userId}`;
     const data = {
-      status, // 'online' | 'offline' | 'away'
+      status,
       lastSeen: lastSeen || Date.now(),
       timestamp: Date.now(),
     };
-
     try {
       await this.redis.setex(key, this.TTL.USER_PRESENCE, JSON.stringify(data));
       return true;
@@ -176,9 +138,6 @@ class CacheService {
     }
   }
 
-  /**
-   * Get user presence
-   */
   async getPresence(userId) {
     const key = `presence:${userId}`;
     try {
@@ -190,15 +149,9 @@ class CacheService {
     }
   }
 
-  /**
-   * Get multiple users' presence
-   */
   async getMultiplePresence(userIds) {
     const pipeline = this.redis.pipeline();
-
-    userIds.forEach((userId) => {
-      pipeline.get(`presence:${userId}`);
-    });
+    userIds.forEach((userId) => pipeline.get(`presence:${userId}`));
 
     try {
       const results = await pipeline.exec();
@@ -212,11 +165,6 @@ class CacheService {
     }
   }
 
-  // =============== UTILITY METHODS ===============
-
-  /**
-   * Clear all cache keys matching a pattern
-   */
   async clearPattern(pattern) {
     try {
       const keys = await this.redis.keys(pattern);
@@ -230,14 +178,10 @@ class CacheService {
     }
   }
 
-  /**
-   * Get cache statistics
-   */
   async getStats() {
     try {
       const info = await this.redis.info("stats");
       const keyspace = await this.redis.info("keyspace");
-
       return {
         info,
         keyspace,
@@ -250,5 +194,5 @@ class CacheService {
   }
 }
 
-// Export singleton instance
-export const cacheService = new CacheService();
+// Export class, NOT instance - will be instantiated with redis client
+export default CacheService;

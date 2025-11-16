@@ -1,14 +1,6 @@
-// api/src/sockets/managers/ConnectionManager.js
-import { cacheClient } from "../../config/redis.js";
-
-/**
- * ConnectionManager - Redis-backed connection tracking
- * Enables horizontal scaling across multiple server instances
- * All connection state stored in Redis for distributed consistency
- */
 export class ConnectionManager {
-  constructor() {
-    this.redis = cacheClient;
+  constructor(redisClient) {
+    this.redis = redisClient;
     this.localSockets = new Map(); // socketId -> socket instance (local only)
     this.CONNECTION_TTL = 60 * 60 * 24; // 24 hours
     this.PRESENCE_TTL = 60 * 5; // 5 minutes
@@ -388,5 +380,4 @@ export class ConnectionManager {
   }
 }
 
-// Singleton instance
-export const connectionManager = new ConnectionManager();
+export default ConnectionManager;
